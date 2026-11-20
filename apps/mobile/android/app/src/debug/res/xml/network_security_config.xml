@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Hanya untuk build debug: izinkan HTTP ke server lokal di jaringan mana pun
+  (mis. http://192.168.1.10:4000 saat menguji di HP fisik).
+  Jangan dipakai di build release.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

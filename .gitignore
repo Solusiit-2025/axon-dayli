@@ -1,0 +1,44 @@
+# ─── Node / server ───
+node_modules/
+dist/
+*.log
+npm-debug.log*
+
+# ─── Prisma ───
+apps/server/prisma/migrations/dev.db*
+
+# ─── Flutter / Dart ───
+.dart_tool/
+.packages
+.pub-cache/
+.pub/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+apps/mobile/android/.gradle/
+apps/mobile/android/local.properties
+apps/mobile/android/app/debug/
+apps/mobile/android/app/profile/
+apps/mobile/android/app/release/
+apps/mobile/ios/Pods/
+*.iml
+
+# File hasil code generation (boleh di-generate ulang)
+apps/mobile/lib/data/local/database.g.dart
+
+# ─── Rahasia & konfigurasi lokal ───
+.env
+.env.local
+apps/server/.env
+*.keystore
+*.jks
+
+# ─── Dev database lokal ───
+.dev/
+pgdata/
+
+# ─── Editor / OS ───
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

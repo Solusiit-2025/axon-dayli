@@ -1,0 +1,668 @@
+import 'dart:convert';
+import 'package:drift/drift.dart' show Value;
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
+
+import '../../app/providers.dart';
+import '../../core/dates.dart';
+import '../../core/money.dart';
+import '../../core/theme.dart';
+import '../../data/local/database.dart';
+import '../common/widgets.dart';
+
+const assetCategories = <String, String>{
+  'vehicle': 'Kendaraan',
+  'property': 'Properti',
+  'electronics': 'Elektronik',
+  'investment': 'Investasi',
+  'equipment': 'Peralatan',
+  'other': 'Lainnya',
+};
+
+Future<void> showAssetEditor(BuildContext context, WidgetRef ref, {Asset? existing}) {
+  return showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    showDragHandle: true,
+    builder: (ctx) => SizedBox(
+      height: MediaQuery.of(ctx).size.height * 0.88,
+      child: _AssetEditorSheet(existing: existing),
+    ),
+  );
+}
+
+class _AssetEditorSheet extends ConsumerStatefulWidget {
+  const _AssetEditorSheet({this.existing});
+
+  final Asset? existing;
+
+  @override
+  ConsumerState<_AssetEditorSheet> createState() => _AssetEditorSheetState();
+}
+
+class _AssetEditorSheetState extends ConsumerState<_AssetEditorSheet> {
+  late final TextEditingController _name;
+  late final TextEditingController _price;
+  late final TextEditingController _value;
+  late final TextEditingController _note;
+  late String _category;
+  late String _status;
+  String? _debtId;
+  DateTime? _purchaseAt;
+  List<String> _attachments = [];
+  bool _saving = false;
+  bool _deleting = false;
+
+  /// Menandai data sudah tersimpan. Dipakai agar tombol tidak bisa ditekan
+  /// dua kali (mencegah input ganda) selama sheet belum selesai ditutup.
+  bool _saved = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final a = widget.existing;
+    _name = TextEditingController(text: a?.name ?? '');
+    _price = TextEditingController(text: a?.purchasePrice == null ? '' : formatNumber(a!.purchasePrice!));
+    _value = TextEditingController(text: a == null ? '' : formatNumber(a.currentValue));
+    _note = TextEditingController(text: a?.note ?? '');
+    _category = a?.category ?? 'electronics';
+    _status = a?.status ?? 'ACTIVE';
+    _debtId = a?.debtId;
+    _purchaseAt = a?.purchaseAt;
+
+    if (a?.attachments != null && a!.attachments!.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(a.attachments!);
+        if (decoded is List) {
+          _attachments = decoded.map((e) => e.toString()).toList();
+        } else {
+          _attachments = [a.attachments!];
+        }
+      } catch (_) {
+        _attachments = [a.attachments!];
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _price.dispose();
+    _value.dispose();
+    _note.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickImages() async {
+    try {
+      final source = await showModalBottomSheet<ImageSource>(
+        context: context,
+        showDragHandle: true,
+        builder: (ctx) => SafeArea(
+          child: Wrap(
+            children: [
+              ListTile(
+                leading: const Icon(Icons.camera_alt_outlined, color: Color(0xFF4F46E5)),
+                title: const Text('Ambil Foto Kamera', style: TextStyle(fontWeight: FontWeight.w600)),
+                subtitle: const Text('Foto fisik aset/kendaraan/properti langsung'),
+                onTap: () => Navigator.pop(ctx, ImageSource.camera),
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.photo_library_outlined, color: Color(0xFF2563EB)),
+                title: const Text('Pilih dari Galeri', style: TextStyle(fontWeight: FontWeight.w600)),
+                subtitle: const Text('Pilih foto aset dari galeri HP'),
+                onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+              ),
+            ],
+          ),
+        ),
+      );
+
+      if (source == null) return;
+
+      if (source == ImageSource.camera) {
+        final picker = ImagePicker();
+        final XFile? file = await picker.pickImage(source: ImageSource.camera, maxWidth: 1600, maxHeight: 1600, imageQuality: 70);
+        if (file == null) return;
+
+        final bytes = await file.readAsBytes();
+        final base64Str = base64Encode(bytes);
+        final mimeType = file.mimeType ?? 'image/jpeg';
+        final dataUrl = 'data:$mimeType;base64,$base64Str';
+        setState(() {
+          _attachments.add(dataUrl);
+        });
+      } else {
+        final picker = ImagePicker();
+        final List<XFile> pickedFiles = await picker.pickMultiImage(maxWidth: 1600, maxHeight: 1600, imageQuality: 70);
+        if (pickedFiles.isEmpty) return;
+
+        for (final file in pickedFiles) {
+          final bytes = await file.readAsBytes();
+          final base64Str = base64Encode(bytes);
+          final mimeType = file.mimeType ?? 'image/jpeg';
+          final dataUrl = 'data:$mimeType;base64,$base64Str';
+          _attachments.add(dataUrl);
+        }
+        setState(() {});
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Gagal mengambil gambar: $e')),
+        );
+      }
+    }
+  }
+
+  void _showImageDialog(String item) {
+    ImageProvider? provider;
+    if (item.startsWith('data:image')) {
+      final base64Part = item.split(',').last;
+      provider = MemoryImage(base64Decode(base64Part));
+    } else if (item.startsWith('http')) {
+      provider = NetworkImage(item);
+    }
+
+    showDialog<void>(
+      context: context,
+      builder: (_) => Dialog(
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (provider != null)
+              Image(image: provider, fit: BoxFit.contain)
+            else
+              const Padding(
+                padding: EdgeInsets.all(40),
+                child: Icon(Icons.broken_image, size: 48),
+              ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Tutup'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickDate() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _purchaseAt ?? now,
+      firstDate: DateTime(now.year - 40),
+      lastDate: now,
+      helpText: 'Tanggal Pembelian',
+    );
+    if (picked != null) setState(() => _purchaseAt = picked);
+  }
+
+  Future<void> _deleteAsset() async {
+    if (_saving || _deleting || _saved) return;
+
+    final a = widget.existing;
+    if (a == null) return;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Hapus Aset?'),
+        content: Text('Apakah Anda yakin ingin menghapus aset "${a.name}"? Data riwayat nilai dan perawatan akan dihapus.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Batal'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red.shade700),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Hapus'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    setState(() => _deleting = true);
+
+    try {
+      final db = ref.read(databaseProvider);
+      await db.deleteAsset(a.id);
+      ref.read(syncSchedulerProvider).schedule();
+
+      if (mounted) {
+        Navigator.of(context).pop(); // Tutup bottom sheet aset.
+        showAppSnack(context, 'Aset "${a.name}" berhasil dihapus');
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Gagal menghapus aset: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _deleting = false);
+    }
+  }
+
+  Future<void> _save() async {
+    if (_saving || _deleting || _saved) return;
+
+    final name = _name.text.trim();
+    if (name.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Nama aset wajib diisi')),
+      );
+      return;
+    }
+
+    setState(() => _saving = true);
+
+    try {
+      final db = ref.read(databaseProvider);
+      var ws = ref.read(currentWorkspaceProvider);
+
+      if (ws == null) {
+        final list = await db.listWorkspaces();
+        if (list.isNotEmpty) {
+          ws = list.first;
+        } else {
+          final defaultWsId = newId();
+          await db.upsertWorkspaceFromServer({
+            'id': defaultWsId,
+            'type': 'PERSONAL',
+            'name': 'Pribadi',
+            'color': '#10B981',
+            'icon': 'person',
+          });
+          await db.ensureWorkspaceDefaults(defaultWsId, 'PERSONAL');
+          ws = (await db.listWorkspaces()).first;
+        }
+      }
+
+      final now = DateTime.now();
+      final price = parseMoney(_price.text);
+      final value = _value.text.trim().isEmpty ? price : parseMoney(_value.text);
+      final attachmentValue = Value(_attachments.isEmpty ? null : jsonEncode(_attachments));
+
+      if (widget.existing == null) {
+        final saved = await db.saveAsset(AssetsCompanion.insert(
+          id: newId(),
+          workspaceId: ws.id,
+          name: name,
+          category: Value(_category),
+          purchaseAt: Value(_purchaseAt),
+          purchasePrice: Value(price == 0 ? null : price),
+          currentValue: Value(value),
+          status: Value(_status),
+          debtId: Value(_debtId),
+          attachments: attachmentValue,
+          note: Value(_note.text.trim().isEmpty ? null : _note.text.trim()),
+          createdAt: now,
+          updatedAt: now,
+          deviceId: '',
+        ));
+        if (value > 0) {
+          try {
+            await db.addValuation(
+              workspaceId: ws.id,
+              assetId: saved.id,
+              value: value,
+              valuedAt: _purchaseAt ?? now,
+            );
+          } catch (_) {
+            // Riwayat nilai gagal dibuat, tetapi aset sudah tersimpan.
+          }
+        }
+      } else {
+        await db.saveAsset(AssetsCompanion(
+          id: Value(widget.existing!.id),
+          workspaceId: Value(widget.existing!.workspaceId),
+          name: Value(name),
+          category: Value(_category),
+          purchaseAt: Value(_purchaseAt),
+          purchasePrice: Value(price == 0 ? null : price),
+          currentValue: Value(value),
+          status: Value(_status),
+          debtId: Value(_debtId),
+          attachments: attachmentValue,
+          note: Value(_note.text.trim().isEmpty ? null : _note.text.trim()),
+        ));
+      }
+
+      ref.read(syncSchedulerProvider).schedule();
+
+      if (mounted) {
+        _saved = true;
+        Navigator.of(context).pop();
+        showAppSnack(
+          context,
+          widget.existing == null ? 'Aset berhasil ditambahkan' : 'Perubahan aset disimpan',
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Gagal menyimpan aset: $e')),
+        );
+      }
+    } finally {
+      if (mounted && !_saved) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: bottomInset),
+      child: Column(
+        children: [
+          // Header Sticky Modal Sheet
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 10),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  widget.existing == null ? 'Tambah Aset Baru' : 'Edit Data Aset',
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, letterSpacing: -0.3),
+                ),
+                if (widget.existing != null)
+                  OutlinedButton.icon(
+                    onPressed: (_saving || _deleting || _saved) ? null : _deleteAsset,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: kDanger,
+                      side: BorderSide(color: kDanger.withValues(alpha: 0.4)),
+                      minimumSize: const Size(0, 38),
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                    ),
+                    icon: _deleting
+                        ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: kDanger))
+                        : const Icon(Icons.delete_outline, size: 16),
+                    label: const Text('Hapus', style: TextStyle(fontSize: 12.5)),
+                  ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+
+          // Scrollable Form Fields
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text('Nama Aset *', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 6),
+                  TextField(
+                    controller: _name,
+                    autofocus: widget.existing == null,
+                    textCapitalization: TextCapitalization.words,
+                    decoration: const InputDecoration(hintText: 'Misal: Laptop MacBook / Toyota Avanza'),
+                  ),
+                  const SizedBox(height: 16),
+
+                  Text(
+                    'Kategori',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: theme.colorScheme.onSurfaceVariant),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final entry in assetCategories.entries)
+                        ChoiceChip(
+                          selected: _category == entry.key,
+                          onSelected: (_) => setState(() => _category = entry.key),
+                          label: Text(entry.value),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+
+                  Text(
+                    'Relasi Angsuran / Catatan Utang (opsional)',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: theme.colorScheme.onSurfaceVariant),
+                  ),
+                  const SizedBox(height: 6),
+                  () {
+                    final debtsList = ref.watch(debtsProvider).valueOrNull ?? const <Debt>[];
+                    final openDebts = debtsList.where((d) => d.remaining > 0 && d.direction == 'PAYABLE').toList();
+
+                    if (openDebts.isEmpty) {
+                      return Text(
+                        'Belum ada catatan angsuran aktif di menu Perencanaan.',
+                        style: theme.textTheme.bodySmall?.copyWith(fontSize: 11),
+                      );
+                    }
+
+                    return DropdownButtonFormField<String?>(
+                      initialValue: _debtId,
+                      decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10)),
+                      items: [
+                        const DropdownMenuItem<String?>(value: null, child: Text('Tanpa Angsuran (Lunas / Bebas Utang)', style: TextStyle(fontSize: 13))),
+                        for (final d in openDebts)
+                          DropdownMenuItem<String?>(
+                            value: d.id,
+                            child: Text('${d.counterparty} (Sisa ${formatMoney(d.remaining)})', style: const TextStyle(fontSize: 13)),
+                          ),
+                      ],
+                      onChanged: (val) => setState(() => _debtId = val),
+                    );
+                  }(),
+                  const SizedBox(height: 16),
+
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('Harga Beli (Rp)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                            const SizedBox(height: 6),
+                            TextField(
+                              controller: _price,
+                              keyboardType: TextInputType.number,
+                              decoration: const InputDecoration(hintText: '0'),
+                              onChanged: (val) {
+                                final formatted = formatMoneyInput(val);
+                                if (formatted != val) {
+                                  _price.value = TextEditingValue(
+                                    text: formatted,
+                                    selection: TextSelection.collapsed(offset: formatted.length),
+                                  );
+                                }
+                                setState(() {});
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('Nilai Sekarang (Rp)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                            const SizedBox(height: 6),
+                            TextField(
+                              controller: _value,
+                              keyboardType: TextInputType.number,
+                              decoration: const InputDecoration(hintText: '0'),
+                              onChanged: (val) {
+                                final formatted = formatMoneyInput(val);
+                                if (formatted != val) {
+                                  _value.value = TextEditingValue(
+                                    text: formatted,
+                                    selection: TextSelection.collapsed(offset: formatted.length),
+                                  );
+                                }
+                                setState(() {});
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+
+                  OutlinedButton.icon(
+                    onPressed: _pickDate,
+                    icon: const Icon(Icons.event_outlined, size: 18),
+                    label: Text(_purchaseAt == null ? 'Tanggal Pembelian' : formatDate(_purchaseAt!)),
+                  ),
+                  const SizedBox(height: 16),
+
+                  Text(
+                    'Status Aset',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: theme.colorScheme.onSurfaceVariant),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      for (final s in const {'ACTIVE': 'Aktif', 'MAINTENANCE': 'Perawatan', 'SOLD': 'Terjual', 'LOST': 'Hilang'}.entries)
+                        ChoiceChip(
+                          selected: _status == s.key,
+                          onSelected: (_) => setState(() => _status = s.key),
+                          label: Text(s.value),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+
+                  const Text('Catatan Aset (opsional)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 6),
+                  TextField(
+                    controller: _note,
+                    minLines: 1,
+                    maxLines: 3,
+                    textCapitalization: TextCapitalization.sentences,
+                    decoration: const InputDecoration(hintText: 'Nomor seri, spesifikasi, lokasi...'),
+                  ),
+                  const SizedBox(height: 16),
+
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Foto Fisik / Kwitansi Aset (${_attachments.length})',
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: theme.colorScheme.onSurfaceVariant),
+                      ),
+                      IconButton(
+                        onPressed: _pickImages,
+                        tooltip: 'Tambah Foto Aset',
+                        icon: const Icon(Icons.add_a_photo_outlined, size: 20),
+                      ),
+                    ],
+                  ),
+
+                  if (_attachments.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      height: 90,
+                      child: ListView.builder(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: _attachments.length,
+                        itemBuilder: (context, index) {
+                          final item = _attachments[index];
+                          ImageProvider? provider;
+                          if (item.startsWith('data:image')) {
+                            final base64Part = item.split(',').last;
+                            provider = MemoryImage(base64Decode(base64Part));
+                          } else if (item.startsWith('http')) {
+                            provider = NetworkImage(item);
+                          }
+
+                          return Container(
+                            width: 85,
+                            margin: const EdgeInsets.only(right: 8),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: theme.dividerColor),
+                              image: provider != null ? DecorationImage(image: provider, fit: BoxFit.cover) : null,
+                            ),
+                            child: Stack(
+                              children: [
+                                if (provider == null)
+                                  const Center(child: Icon(Icons.inventory_2_outlined, color: Colors.grey)),
+                                Positioned.fill(
+                                  child: Material(
+                                    color: Colors.transparent,
+                                    child: InkWell(
+                                      borderRadius: BorderRadius.circular(10),
+                                      onTap: () => _showImageDialog(item),
+                                    ),
+                                  ),
+                                ),
+                                Positioned(
+                                  top: 4,
+                                  right: 4,
+                                  child: InkWell(
+                                    onTap: () {
+                                      setState(() {
+                                        _attachments.removeAt(index);
+                                      });
+                                    },
+                                    child: Container(
+                                      padding: const EdgeInsets.all(3),
+                                      decoration: BoxDecoration(
+                                        color: Colors.black.withValues(alpha: 0.7),
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: const Icon(Icons.close, size: 12, color: Colors.white),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+
+          // Sticky Footer Action Bar
+          Container(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surface,
+              border: Border(top: BorderSide(color: theme.dividerColor)),
+            ),
+            child: SafeArea(
+              top: false,
+              child: FilledButton.icon(
+                onPressed: (_saving || _deleting || _saved) ? null : _save,
+                icon: _saving
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      )
+                    : const Icon(Icons.check, size: 18),
+                label: Text(widget.existing == null ? 'Simpan Aset' : 'Simpan Perubahan'),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

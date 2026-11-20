@@ -1,0 +1,587 @@
+// DailyPilot — Prisma schema
+// Database: PostgreSQL (lokal via PostgreSQL 18 / Docker)
+//
+// Konvensi sinkronisasi:
+//  - id dibuat di client (UUID v7) agar bisa membuat data saat offline
+//  - version naik setiap edit lokal; server menolak version <= versi tersimpan
+//  - deletedAt bersifat tombstone (soft delete), dihapus permanen setelah 30 hari
+//  - SyncLog.seq adalah cursor pull yang monoton dan bebas tabrakan
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────── Identity ───────────────────────────────
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  timezone     String   @default("Asia/Jakarta")
+  currency     String   @default("IDR")
+  pinHash      String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  workspaces    Workspace[]
+  devices       Device[]
+  refreshTokens RefreshToken[]
+  syncLogs      SyncLog[]
+  syncOpLogs    SyncOpLog[]
+}
+
+model Device {
+  id         String   @id @default(uuid())
+  userId     String
+  name       String
+  platform   String   @default("android")
+  appVersion String?
+  pushToken  String?
+  lastSeenAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  userId    String
+  tokenHash String    @unique
+  deviceId  String?
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Workspace {
+  id         String        @id @default(uuid())
+  userId     String
+  type       WorkspaceType
+  name       String
+  color      String        @default("#2563EB")
+  icon       String        @default("briefcase")
+  archivedAt DateTime?
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+  deletedAt  DateTime?
+  version    Int           @default(1)
+  deviceId   String        @default("server")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  projects     Project[]
+  tasks        Task[]
+  reminders    Reminder[]
+  events       CalendarEvent[]
+  wallets      Wallet[]
+  categories   Category[]
+  budgets      Budget[]
+  debts        Debt[]
+  assets       Asset[]
+  attachments  Attachment[]
+  transactions Transaction[]
+  documents    Document[]
+
+  @@index([userId])
+}
+
+// ─────────────────────────────── Work ───────────────────────────────
+
+enum WorkspaceType {
+  PERSONAL
+  COMPANY
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  BLOCKED
+  DONE
+  CANCELLED
+}
+
+model Project {
+  id          String    @id
+  workspaceId String
+  name        String
+  description String?
+  color       String    @default("#6366F1")
+  status      String    @default("active")
+  startAt     DateTime?
+  dueAt       DateTime?
+  createdAt   DateTime
+  updatedAt   DateTime
+  deletedAt   DateTime?
+  version     Int       @default(1)
+  deviceId    String
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  tasks     Task[]
+
+  @@index([workspaceId, deletedAt])
+}
+
+model Task {
+  id               String     @id
+  workspaceId      String
+  projectId        String?
+  parentTaskId     String?
+  title            String
+  description      String?
+  status           TaskStatus @default(TODO)
+  priority         Int        @default(2)
+  progress         Int        @default(0)
+  startAt          DateTime?
+  dueAt            DateTime?
+  completedAt      DateTime?
+  estimatedMinutes Int?
+  actualMinutes    Int        @default(0)
+  tags             String[]   @default([])
+  recurrenceRule   String?
+  createdAt        DateTime
+  updatedAt        DateTime
+  deletedAt        DateTime?
+  version          Int        @default(1)
+  deviceId         String
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project   Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  parent    Task?     @relation("Subtasks", fields: [parentTaskId], references: [id], onDelete: Cascade)
+  subtasks  Task[]    @relation("Subtasks")
+
+  checklist     ChecklistItem[]
+  progressLogs  TaskProgressLog[]
+  linkedEvents  CalendarEvent[]
+
+  @@index([workspaceId, deletedAt, status])
+  @@index([workspaceId, dueAt])
+  @@index([projectId])
+  @@index([parentTaskId])
+}
+
+model ChecklistItem {
+  id          String    @id
+  workspaceId String
+  taskId      String
+  title       String
+  isDone      Boolean   @default(false)
+  sortOrder   Int       @default(0)
+  createdAt   DateTime
+  updatedAt   DateTime
+  deletedAt   DateTime?
+  version     Int       @default(1)
+  deviceId    String
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId, deletedAt])
+}
+
+model TaskProgressLog {
+  id             String   @id
+  workspaceId    String
+  taskId         String
+  progressBefore Int
+  progressAfter  Int
+  note           String?
+  occurredAt     DateTime
+  createdAt      DateTime
+  updatedAt      DateTime
+  deletedAt      DateTime?
+  version        Int      @default(1)
+  deviceId       String
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId, occurredAt])
+}
+
+enum ReminderEntityType {
+  TASK
+  EVENT
+  TRANSACTION
+  BUDGET
+  CUSTOM
+}
+
+model Reminder {
+  id             String            @id
+  workspaceId    String
+  entityType     ReminderEntityType @default(CUSTOM)
+  entityId       String?
+  title          String
+  message        String?
+  triggerAt      DateTime
+  recurrenceRule String?
+  snoozeUntil    DateTime?
+  isActive       Boolean           @default(true)
+  firedAt        DateTime?
+  createdAt      DateTime
+  updatedAt      DateTime
+  deletedAt      DateTime?
+  version        Int               @default(1)
+  deviceId       String
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, triggerAt, isActive])
+}
+
+model CalendarEvent {
+  id             String    @id
+  workspaceId    String
+  title          String
+  location       String?
+  startAt        DateTime
+  endAt          DateTime
+  allDay         Boolean   @default(false)
+  recurrenceRule String?
+  linkedTaskId   String?
+  note           String?
+  createdAt      DateTime
+  updatedAt      DateTime
+  deletedAt      DateTime?
+  version        Int       @default(1)
+  deviceId       String
+
+  workspace  Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  linkedTask Task?     @relation(fields: [linkedTaskId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, startAt])
+}
+
+// ─────────────────────────────── Finance ───────────────────────────────
+
+enum WalletType {
+  CASH
+  BANK
+  EWALLET
+  CREDIT
+}
+
+enum CategoryKind {
+  INCOME
+  EXPENSE
+}
+
+enum TransactionType {
+  INCOME
+  EXPENSE
+  TRANSFER
+}
+
+enum BudgetPeriod {
+  WEEKLY
+  MONTHLY
+  CUSTOM
+}
+
+enum DebtDirection {
+  RECEIVABLE
+  PAYABLE
+}
+
+model Wallet {
+  id             String     @id
+  workspaceId    String
+  name           String
+  type           WalletType @default(CASH)
+  initialBalance BigInt     @default(0)
+  currency       String     @default("IDR")
+  archivedAt     DateTime?
+  createdAt      DateTime
+  updatedAt      DateTime
+  deletedAt      DateTime?
+  version        Int        @default(1)
+  deviceId       String
+
+  workspace    Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+
+  @@index([workspaceId, deletedAt])
+}
+
+model Category {
+  id          String       @id
+  workspaceId String
+  name        String
+  kind        CategoryKind
+  parentId    String?
+  icon        String       @default("label")
+  color       String       @default("#64748B")
+  createdAt   DateTime
+  updatedAt   DateTime
+  deletedAt   DateTime?
+  version     Int          @default(1)
+  deviceId    String
+
+  workspace    Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  parent       Category?     @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children     Category[]    @relation("CategoryTree")
+  transactions Transaction[]
+  budgets      Budget[]
+
+  @@index([workspaceId, kind, deletedAt])
+}
+
+model Transaction {
+  id              String          @id
+  workspaceId     String
+  walletId        String
+  categoryId      String?
+  budgetId        String?
+  type            TransactionType
+  amount          BigInt
+  fee             BigInt          @default(0)
+  transferGroupId String?
+  occurredAt      DateTime
+  note            String?
+  payee           String?
+  attachmentId    String?
+  isReconciled    Boolean         @default(false)
+  createdAt       DateTime
+  updatedAt       DateTime
+  deletedAt       DateTime?
+  version         Int             @default(1)
+  deviceId        String
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  wallet    Wallet    @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  category  Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, occurredAt])
+  @@index([workspaceId, type])
+  @@index([walletId])
+}
+
+model Budget {
+  id          String       @id
+  workspaceId String
+  categoryId  String
+  name        String?
+  period      BudgetPeriod @default(MONTHLY)
+  amount      BigInt
+  startAt     DateTime
+  endAt       DateTime?
+  rollover    Boolean      @default(false)
+  note        String?
+  createdAt   DateTime
+  updatedAt   DateTime
+  deletedAt   DateTime?
+  version     Int          @default(1)
+  deviceId    String
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  category  Category  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, deletedAt])
+}
+
+model Debt {
+  id                 String        @id
+  workspaceId        String
+  counterparty       String
+  direction          DebtDirection
+  category           String?
+  assetId            String?
+  principal          BigInt
+  remaining          BigInt
+  monthlyInstallment BigInt?
+  tenorMonths        Int?
+  contractNumber     String?
+  dueAt              DateTime?
+  note               String?
+  status       String        @default("open")
+  createdAt    DateTime
+  updatedAt    DateTime
+  deletedAt    DateTime?
+  version      Int           @default(1)
+  deviceId     String
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, direction, status])
+}
+
+// ─────────────────────────────── Assets ───────────────────────────────
+
+enum AssetStatus {
+  ACTIVE
+  MAINTENANCE
+  SOLD
+  LOST
+}
+
+enum DepreciationMethod {
+  NONE
+  STRAIGHT_LINE
+  DECLINING
+}
+
+enum ValuationSource {
+  MANUAL
+  AUTO_DEPRECIATION
+}
+
+model Asset {
+  id                 String             @id
+  workspaceId        String
+  name               String
+  category           String             @default("other")
+  purchaseAt         DateTime?
+  purchasePrice      BigInt?
+  currentValue       BigInt             @default(0)
+  depreciationMethod DepreciationMethod @default(NONE)
+  usefulLifeMonths   Int?
+  salvageValue       BigInt?
+  status             AssetStatus        @default(ACTIVE)
+  serialNumber       String?
+  debtId             String?
+  attachments        String?
+  note               String?
+  createdAt          DateTime
+  updatedAt          DateTime
+  deletedAt          DateTime?
+  version            Int                @default(1)
+  deviceId           String
+
+  workspace    Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  valuations   AssetValuation[]
+  maintenance  AssetMaintenance[]
+
+  @@index([workspaceId, deletedAt, status])
+}
+
+model AssetValuation {
+  id        String          @id
+  workspaceId String
+  assetId   String
+  value     BigInt
+  valuedAt  DateTime
+  source    ValuationSource @default(MANUAL)
+  note      String?
+  createdAt DateTime
+  updatedAt DateTime
+  deletedAt DateTime?
+  version   Int             @default(1)
+  deviceId  String
+
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@index([assetId, valuedAt])
+}
+
+model AssetMaintenance {
+  id          String    @id
+  workspaceId String
+  assetId     String
+  title       String
+  cost        BigInt    @default(0)
+  performedAt DateTime
+  nextDueAt   DateTime?
+  note        String?
+  createdAt   DateTime
+  updatedAt   DateTime
+  deletedAt   DateTime?
+  version     Int       @default(1)
+  deviceId    String
+
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@index([assetId, performedAt])
+}
+
+model Document {
+  id          String    @id
+  workspaceId String
+  title       String
+  category    String    @default("IDENTITY")
+  docNumber   String?
+  holderName  String?
+  issueDate   DateTime?
+  expiryDate  DateTime?
+  attachments String?
+  note        String?
+  createdAt   DateTime
+  updatedAt   DateTime
+  deletedAt   DateTime?
+  version     Int       @default(1)
+  deviceId    String
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, deletedAt, category])
+}
+
+enum AttachmentOwnerType {
+  TASK
+  TRANSACTION
+  ASSET
+  EVENT
+}
+
+model Attachment {
+  id          String             @id
+  workspaceId String
+  ownerType   AttachmentOwnerType
+  ownerId     String
+  fileName    String
+  mimeType    String
+  sizeBytes   Int
+  remoteUrl   String?
+  checksum    String?
+  createdAt   DateTime
+  updatedAt   DateTime
+  deletedAt   DateTime?
+  version     Int                @default(1)
+  deviceId    String
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([ownerType, ownerId])
+}
+
+// ───────────────────────────── Sync plumbing ─────────────────────────────
+
+/// Cursor pull: satu baris per perubahan, seq monoton naik.
+model SyncLog {
+  seq        BigInt   @id @default(autoincrement())
+  userId     String
+  workspaceId String
+  entity     String
+  entityId   String
+  deleted    Boolean  @default(false)
+  serverAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, seq])
+}
+
+/// Idempotensi push: opId yang sama tidak boleh diterapkan dua kali.
+model SyncOpLog {
+  id          String   @id
+  userId      String
+  workspaceId String
+  entity      String
+  entityId    String
+  op          String
+  result      String
+  appliedAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, appliedAt])
+}
