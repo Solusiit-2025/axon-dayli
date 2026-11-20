@@ -1,5 +1,6 @@
 import 'package:drift/drift.dart' show Value;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -54,7 +55,25 @@ class TaskDetailScreen extends ConsumerWidget {
           ),
           PopupMenuButton<String>(
             onSelected: (value) async {
-              if (value == 'delete') {
+              if (value == 'gcal') {
+                final title = Uri.encodeComponent(task.title);
+                final details = Uri.encodeComponent(task.description ?? 'Kegiatan dari Axon Dayli');
+                final startTime = task.dueAt ?? DateTime.now();
+                final endTime = startTime.add(const Duration(hours: 1));
+
+                String formatGCalDate(DateTime dt) {
+                  final utc = dt.toUtc();
+                  return '${utc.year}${utc.month.toString().padLeft(2, '0')}${utc.day.toString().padLeft(2, '0')}T${utc.hour.toString().padLeft(2, '0')}${utc.minute.toString().padLeft(2, '0')}${utc.second.toString().padLeft(2, '0')}Z';
+                }
+
+                final dates = '${formatGCalDate(startTime)}/${formatGCalDate(endTime)}';
+                final url = 'https://calendar.google.com/calendar/render?action=TEMPLATE&text=$title&details=$details&dates=$dates';
+
+                await Clipboard.setData(ClipboardData(text: url));
+                if (context.mounted) {
+                  showAppSnack(context, 'Link Google Calendar disalin ke Clipboard!');
+                }
+              } else if (value == 'delete') {
                 final ok = await showDialog<bool>(
                   context: context,
                   builder: (context) => AlertDialog(
@@ -74,6 +93,16 @@ class TaskDetailScreen extends ConsumerWidget {
               }
             },
             itemBuilder: (_) => const [
+              PopupMenuItem(
+                value: 'gcal',
+                child: Row(
+                  children: [
+                    Icon(Icons.calendar_month_outlined, size: 18, color: Color(0xFF4F46E5)),
+                    SizedBox(width: 8),
+                    Text('Simpan ke Google Calendar'),
+                  ],
+                ),
+              ),
               PopupMenuItem(value: 'delete', child: Text('Hapus tugas')),
             ],
           ),
