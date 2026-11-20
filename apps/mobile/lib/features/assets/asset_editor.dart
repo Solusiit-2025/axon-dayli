@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:drift/drift.dart' show Value;
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
@@ -95,9 +96,9 @@ class _AssetEditorSheetState extends ConsumerState<_AssetEditorSheet> {
     super.dispose();
   }
 
-  Future<void> _pickImages() async {
+  Future<void> _pickAttachments() async {
     try {
-      final source = await showModalBottomSheet<ImageSource>(
+      final choice = await showModalBottomSheet<String>(
         context: context,
         showDragHandle: true,
         builder: (ctx) => SafeArea(
@@ -107,23 +108,30 @@ class _AssetEditorSheetState extends ConsumerState<_AssetEditorSheet> {
                 leading: const Icon(Icons.camera_alt_outlined, color: Color(0xFF4F46E5)),
                 title: const Text('Ambil Foto Kamera', style: TextStyle(fontWeight: FontWeight.w600)),
                 subtitle: const Text('Foto fisik aset/kendaraan/properti langsung'),
-                onTap: () => Navigator.pop(ctx, ImageSource.camera),
+                onTap: () => Navigator.pop(ctx, 'camera'),
               ),
               const Divider(height: 1),
               ListTile(
                 leading: const Icon(Icons.photo_library_outlined, color: Color(0xFF2563EB)),
-                title: const Text('Pilih dari Galeri', style: TextStyle(fontWeight: FontWeight.w600)),
-                subtitle: const Text('Pilih foto aset dari galeri HP'),
-                onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+                title: const Text('Pilih dari Galeri Foto', style: TextStyle(fontWeight: FontWeight.w600)),
+                subtitle: const Text('Pilih foto fisik aset dari galeri HP'),
+                onTap: () => Navigator.pop(ctx, 'gallery'),
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.picture_as_pdf_outlined, color: Color(0xFFDC2626)),
+                title: const Text('Upload Surat & Berkas PDF Aset', style: TextStyle(fontWeight: FontWeight.w600)),
+                subtitle: const Text('Upload file PDF (STNK, BPKB, Sertifikat, Faktur, Polis)'),
+                onTap: () => Navigator.pop(ctx, 'pdf'),
               ),
             ],
           ),
         ),
       );
 
-      if (source == null) return;
+      if (choice == null) return;
 
-      if (source == ImageSource.camera) {
+      if (choice == 'camera') {
         final picker = ImagePicker();
         final XFile? file = await picker.pickImage(source: ImageSource.camera, maxWidth: 1600, maxHeight: 1600, imageQuality: 70);
         if (file == null) return;
@@ -135,7 +143,7 @@ class _AssetEditorSheetState extends ConsumerState<_AssetEditorSheet> {
         setState(() {
           _attachments.add(dataUrl);
         });
-      } else {
+      } else if (choice == 'gallery') {
         final picker = ImagePicker();
         final List<XFile> pickedFiles = await picker.pickMultiImage(maxWidth: 1600, maxHeight: 1600, imageQuality: 70);
         if (pickedFiles.isEmpty) return;
@@ -145,25 +153,39 @@ class _AssetEditorSheetState extends ConsumerState<_AssetEditorSheet> {
           final base64Str = base64Encode(bytes);
           final mimeType = file.mimeType ?? 'image/jpeg';
           final dataUrl = 'data:$mimeType;base64,$base64Str';
-          _attachments.add(dataUrl);
+          if (!_attachments.contains(dataUrl)) _attachments.add(dataUrl);
+        }
+        setState(() {});
+      } else if (choice == 'pdf') {
+        final result = await FilePicker.platform.pickFiles(
+          type: FileType.custom,
+          allowedExtensions: ['pdf', 'doc', 'docx'],
+          withData: true,
+        );
+        if (result == null || result.files.isEmpty) return;
+        for (final f in result.files) {
+          final bytes = f.bytes;
+          if (bytes != null) {
+            final base64Str = base64Encode(bytes);
+            final fileName = f.name;
+            final dataUrl = 'data:application/pdf;name=${Uri.encodeComponent(fileName)};base64,$base64Str';
+            if (!_attachments.contains(dataUrl)) _attachments.add(dataUrl);
+          }
         }
         setState(() {});
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Gagal mengambil gambar: $e')),
-        );
-      }
+      if (mounted) showAppSnack(context, 'Gagal memilih berkas: $e', error: true);
     }
   }
 
   void _showImageDialog(String item) {
+    final isPdf = item.contains('application/pdf') || item.endsWith('.pdf');
     ImageProvider? provider;
-    if (item.startsWith('data:image')) {
+    if (!isPdf && item.startsWith('data:image')) {
       final base64Part = item.split(',').last;
       provider = MemoryImage(base64Decode(base64Part));
-    } else if (item.startsWith('http')) {
+    } else if (!isPdf && item.startsWith('http')) {
       provider = NetworkImage(item);
     }
 
@@ -174,7 +196,24 @@ class _AssetEditorSheetState extends ConsumerState<_AssetEditorSheet> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (provider != null)
+            if (isPdf)
+              Padding(
+                padding: const EdgeInsets.all(28),
+                child: Column(
+                  children: [
+                    Icon(Icons.picture_as_pdf_rounded, size: 56, color: Colors.red.shade700),
+                    const SizedBox(height: 12),
+                    const Text('Surat & Berkas PDF Aset', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'File PDF tersimpan secara aman dalam format terenkripsi Base64 di database lokal HP & VPS.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 11.5, color: Colors.grey),
+                    ),
+                  ],
+                ),
+              )
+            else if (provider != null)
               Image(image: provider, fit: BoxFit.contain)
             else
               const Padding(
@@ -559,13 +598,13 @@ class _AssetEditorSheetState extends ConsumerState<_AssetEditorSheet> {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        'Foto Fisik / Kwitansi Aset (${_attachments.length})',
+                        'Foto Fisik & Berkas Legal Aset (${_attachments.length})',
                         style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: theme.colorScheme.onSurfaceVariant),
                       ),
                       IconButton(
-                        onPressed: _pickImages,
-                        tooltip: 'Tambah Foto Aset',
-                        icon: const Icon(Icons.add_a_photo_outlined, size: 20),
+                        onPressed: _pickAttachments,
+                        tooltip: 'Tambah Foto / Berkas PDF',
+                        icon: const Icon(Icons.attach_file_rounded, size: 20),
                       ),
                     ],
                   ),
@@ -579,11 +618,12 @@ class _AssetEditorSheetState extends ConsumerState<_AssetEditorSheet> {
                         itemCount: _attachments.length,
                         itemBuilder: (context, index) {
                           final item = _attachments[index];
+                          final isPdf = item.contains('application/pdf') || item.endsWith('.pdf');
                           ImageProvider? provider;
-                          if (item.startsWith('data:image')) {
+                          if (!isPdf && item.startsWith('data:image')) {
                             final base64Part = item.split(',').last;
                             provider = MemoryImage(base64Decode(base64Part));
-                          } else if (item.startsWith('http')) {
+                          } else if (!isPdf && item.startsWith('http')) {
                             provider = NetworkImage(item);
                           }
 
@@ -593,11 +633,26 @@ class _AssetEditorSheetState extends ConsumerState<_AssetEditorSheet> {
                             decoration: BoxDecoration(
                               borderRadius: BorderRadius.circular(10),
                               border: Border.all(color: theme.dividerColor),
+                              color: isPdf ? Colors.red.shade700.withValues(alpha: 0.1) : null,
                               image: provider != null ? DecorationImage(image: provider, fit: BoxFit.cover) : null,
                             ),
                             child: Stack(
                               children: [
-                                if (provider == null)
+                                if (isPdf)
+                                  Center(
+                                    child: Column(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        Icon(Icons.picture_as_pdf_rounded, color: Colors.red.shade700, size: 28),
+                                        const SizedBox(height: 2),
+                                        const Text(
+                                          'Berkas PDF',
+                                          style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: Colors.red),
+                                        ),
+                                      ],
+                                    ),
+                                  )
+                                else if (provider == null)
                                   const Center(child: Icon(Icons.inventory_2_outlined, color: Colors.grey)),
                                 Positioned.fill(
                                   child: Material(

@@ -148,29 +148,41 @@ class AssetDetailScreen extends ConsumerWidget {
 
           if (_parsePhotos(asset.attachments).isNotEmpty) ...[
             const SizedBox(height: 16),
-            const Text('Foto Fisik & Dokumen Aset', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
-            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('Surat-Surat & Berkas Legal Aset', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+                TextButton.icon(
+                  onPressed: () => showAssetEditor(context, ref, existing: asset),
+                  icon: const Icon(Icons.attach_file_rounded, size: 16),
+                  label: const Text('Berkas Baru'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
             SizedBox(
-              height: 110,
+              height: 100,
               child: ListView.builder(
                 scrollDirection: Axis.horizontal,
                 itemCount: _parsePhotos(asset.attachments).length,
                 itemBuilder: (context, index) {
                   final item = _parsePhotos(asset.attachments)[index];
+                  final isPdf = item.contains('application/pdf') || item.endsWith('.pdf');
                   ImageProvider? provider;
-                  if (item.startsWith('data:image')) {
+                  if (!isPdf && item.startsWith('data:image')) {
                     final base64Part = item.split(',').last;
                     provider = MemoryImage(base64Decode(base64Part));
-                  } else if (item.startsWith('http')) {
+                  } else if (!isPdf && item.startsWith('http')) {
                     provider = NetworkImage(item);
                   }
 
                   return Container(
-                    width: 110,
+                    width: 100,
                     margin: const EdgeInsets.only(right: 10),
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(color: theme.dividerColor),
+                      color: isPdf ? Colors.red.shade700.withValues(alpha: 0.1) : null,
                       image: provider != null ? DecorationImage(image: provider, fit: BoxFit.cover) : null,
                     ),
                     child: Material(
@@ -178,6 +190,18 @@ class AssetDetailScreen extends ConsumerWidget {
                       child: InkWell(
                         borderRadius: BorderRadius.circular(12),
                         onTap: () => _showAssetPhotoDialog(context, item),
+                        child: isPdf
+                            ? Center(
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(Icons.picture_as_pdf_rounded, color: Colors.red.shade700, size: 30),
+                                    const SizedBox(height: 2),
+                                    const Text('Surat PDF', textAlign: TextAlign.center, style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w700, color: Colors.red)),
+                                  ],
+                                ),
+                              )
+                            : null,
                       ),
                     ),
                   );
@@ -246,10 +270,20 @@ class AssetDetailScreen extends ConsumerWidget {
           // Riwayat & Input Perawatan / Service
           SectionHeader(
             title: 'Riwayat & Jadwal Perawatan',
-            action: TextButton.icon(
-              onPressed: () => _addMaintenance(context, ref, asset),
-              icon: const Icon(Icons.build_circle_outlined, size: 16),
-              label: const Text('Input Service'),
+            action: Wrap(
+              spacing: 4,
+              children: [
+                TextButton.icon(
+                  onPressed: () => _addTaxReminder(context, ref, asset),
+                  icon: const Icon(Icons.alarm_add_rounded, size: 15, color: Color(0xFFD97706)),
+                  label: const Text('Pajak STNK', style: TextStyle(fontSize: 11.5, color: Color(0xFFD97706))),
+                ),
+                TextButton.icon(
+                  onPressed: () => _addMaintenance(context, ref, asset),
+                  icon: const Icon(Icons.build_circle_outlined, size: 15),
+                  label: const Text('Service', style: TextStyle(fontSize: 11.5)),
+                ),
+              ],
             ),
           ),
           if (maintenances.isEmpty)
@@ -506,6 +540,24 @@ class AssetDetailScreen extends ConsumerWidget {
                         style: const TextStyle(fontSize: 11.5),
                       ),
                     ),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 6,
+                      children: [
+                        ActionChip(
+                          label: const Text('+3 Bulan', style: TextStyle(fontSize: 10.5)),
+                          onPressed: () => setState(() => nextDueDate = date.add(const Duration(days: 90))),
+                        ),
+                        ActionChip(
+                          label: const Text('+6 Bulan', style: TextStyle(fontSize: 10.5)),
+                          onPressed: () => setState(() => nextDueDate = date.add(const Duration(days: 180))),
+                        ),
+                        ActionChip(
+                          label: const Text('+1 Tahun', style: TextStyle(fontSize: 10.5)),
+                          onPressed: () => setState(() => nextDueDate = date.add(const Duration(days: 365))),
+                        ),
+                      ],
+                    ),
                   ],
                 ),
                 const SizedBox(height: 16),
@@ -579,6 +631,20 @@ class AssetDetailScreen extends ConsumerWidget {
                   ));
                 }
 
+                if (nextDueDate != null) {
+                  try {
+                    final notifications = ref.read(notificationsProvider);
+                    await notifications.ensurePermission();
+                    await notifications.schedule(
+                      reminderId: 'maint_${asset.id}_${nextDueDate!.millisecondsSinceEpoch}',
+                      title: '🛠️ Service Aset: ${asset.name}',
+                      body: 'Jadwal service "$serviceTitle" untuk ${asset.name} dijadwalkan pada ${formatDate(nextDueDate!)}.',
+                      triggerAt: nextDueDate!.subtract(const Duration(days: 3)),
+                      payload: asset.id,
+                    );
+                  } catch (_) {}
+                }
+
                 ref.read(syncSchedulerProvider).schedule();
                 if (context.mounted) Navigator.pop(context);
               },
@@ -588,6 +654,59 @@ class AssetDetailScreen extends ConsumerWidget {
         ),
       ),
     );
+  }
+
+  Future<void> _addTaxReminder(BuildContext context, WidgetRef ref, Asset asset) async {
+    final now = DateTime.now();
+    var taxDate = now.add(const Duration(days: 30));
+
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: taxDate,
+      firstDate: now,
+      lastDate: DateTime(now.year + 10),
+      helpText: 'Jatuh Tempo Pajak STNK / PBB / Perpanjangan Aset',
+    );
+
+    if (picked == null || !context.mounted) return;
+
+    final ws = ref.read(currentWorkspaceProvider);
+    if (ws == null) return;
+
+    final db = ref.read(databaseProvider);
+    final reminder = await db.saveReminder(
+      RemindersCompanion.insert(
+        id: newId(),
+        workspaceId: ws.id,
+        entityType: const Value('ASSET'),
+        entityId: Value(asset.id),
+        title: '📌 Pajak STNK / Perpanjangan: ${asset.name}',
+        message: Value('Masa berlaku pajak STNK / PBB untuk aset ${asset.name} jatuh tempo pada ${formatDate(picked)}.'),
+        triggerAt: picked.subtract(const Duration(days: 7)),
+        isActive: const Value(true),
+        createdAt: now,
+        updatedAt: now,
+        deviceId: '',
+      ),
+    );
+
+    ref.read(syncSchedulerProvider).schedule();
+
+    try {
+      final notifications = ref.read(notificationsProvider);
+      await notifications.ensurePermission();
+      await notifications.schedule(
+        reminderId: reminder.id,
+        title: reminder.title,
+        body: reminder.message,
+        triggerAt: picked.subtract(const Duration(days: 7)),
+        payload: asset.id,
+      );
+    } catch (_) {}
+
+    if (context.mounted) {
+      showAppSnack(context, 'Pengingat Pajak STNK Aset "${asset.name}" dipasang untuk ${formatDate(picked)}!');
+    }
   }
 }
 
