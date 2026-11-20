@@ -10,6 +10,7 @@ import '../../app/providers.dart';
 import '../../core/dates.dart';
 import '../../core/money.dart';
 import '../../core/theme.dart';
+import '../../data/remote/api_client.dart';
 import '../common/widgets.dart';
 
 final invoiceFilterProvider = StateProvider<String>((ref) => 'UNPAID');
@@ -58,8 +59,12 @@ class _InvoicesScreenState extends ConsumerState<InvoicesScreen> {
         _loading = false;
       });
     } catch (e) {
+      String msg = e.toString();
+      if (e is ApiException) {
+        msg = e.message;
+      }
       setState(() {
-        _error = e.toString();
+        _error = msg;
         _loading = false;
       });
     }
