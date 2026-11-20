@@ -47,9 +47,12 @@ class _AssetEditorSheetState extends ConsumerState<_AssetEditorSheet> {
   late final TextEditingController _name;
   late final TextEditingController _price;
   late final TextEditingController _value;
+  late final TextEditingController _salvageValue;
+  late final TextEditingController _usefulLifeYears;
   late final TextEditingController _note;
   late String _category;
   late String _status;
+  late String _depreciationMethod;
   String? _debtId;
   DateTime? _purchaseAt;
   List<String> _attachments = [];
@@ -67,9 +70,12 @@ class _AssetEditorSheetState extends ConsumerState<_AssetEditorSheet> {
     _name = TextEditingController(text: a?.name ?? '');
     _price = TextEditingController(text: a?.purchasePrice == null ? '' : formatNumber(a!.purchasePrice!));
     _value = TextEditingController(text: a == null ? '' : formatNumber(a.currentValue));
+    _salvageValue = TextEditingController(text: a?.salvageValue == null ? '' : formatNumber(a!.salvageValue!));
+    _usefulLifeYears = TextEditingController(text: a?.usefulLifeMonths == null ? '5' : (a!.usefulLifeMonths! / 12).round().toString());
     _note = TextEditingController(text: a?.note ?? '');
     _category = a?.category ?? 'electronics';
     _status = a?.status ?? 'ACTIVE';
+    _depreciationMethod = a?.depreciationMethod ?? 'STRAIGHT_LINE';
     _debtId = a?.debtId;
     _purchaseAt = a?.purchaseAt;
 
@@ -92,6 +98,8 @@ class _AssetEditorSheetState extends ConsumerState<_AssetEditorSheet> {
     _name.dispose();
     _price.dispose();
     _value.dispose();
+    _salvageValue.dispose();
+    _usefulLifeYears.dispose();
     _note.dispose();
     super.dispose();
   }
@@ -329,6 +337,9 @@ class _AssetEditorSheetState extends ConsumerState<_AssetEditorSheet> {
       final now = DateTime.now();
       final price = parseMoney(_price.text);
       final value = _value.text.trim().isEmpty ? price : parseMoney(_value.text);
+      final salvagePrice = parseMoney(_salvageValue.text);
+      final years = int.tryParse(_usefulLifeYears.text.trim()) ?? 5;
+      final usefulMonths = years * 12;
       final attachmentValue = Value(_attachments.isEmpty ? null : jsonEncode(_attachments));
 
       if (widget.existing == null) {
@@ -340,6 +351,9 @@ class _AssetEditorSheetState extends ConsumerState<_AssetEditorSheet> {
           purchaseAt: Value(_purchaseAt),
           purchasePrice: Value(price == 0 ? null : price),
           currentValue: Value(value),
+          salvageValue: Value(salvagePrice > 0 ? salvagePrice : null),
+          usefulLifeMonths: Value(usefulMonths),
+          depreciationMethod: Value(_depreciationMethod),
           status: Value(_status),
           debtId: Value(_debtId),
           attachments: attachmentValue,
@@ -369,6 +383,9 @@ class _AssetEditorSheetState extends ConsumerState<_AssetEditorSheet> {
           purchaseAt: Value(_purchaseAt),
           purchasePrice: Value(price == 0 ? null : price),
           currentValue: Value(value),
+          salvageValue: Value(salvagePrice > 0 ? salvagePrice : null),
+          usefulLifeMonths: Value(usefulMonths),
+          depreciationMethod: Value(_depreciationMethod),
           status: Value(_status),
           debtId: Value(_debtId),
           attachments: attachmentValue,
@@ -563,6 +580,78 @@ class _AssetEditorSheetState extends ConsumerState<_AssetEditorSheet> {
                     icon: const Icon(Icons.event_outlined, size: 18),
                     label: Text(_purchaseAt == null ? 'Tanggal Pembelian' : formatDate(_purchaseAt!)),
                   ),
+                  const SizedBox(height: 16),
+
+                  const Divider(height: 1),
+                  const SizedBox(height: 14),
+                  const Text('Metode & Pengaturan Penyusutan Otomatis', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      ChoiceChip(
+                        selected: _depreciationMethod == 'STRAIGHT_LINE',
+                        onSelected: (_) => setState(() => _depreciationMethod = 'STRAIGHT_LINE'),
+                        label: const Text('Garis Lurus (Straight-Line)'),
+                      ),
+                      ChoiceChip(
+                        selected: _depreciationMethod == 'DECLINING_BALANCE',
+                        onSelected: (_) => setState(() => _depreciationMethod = 'DECLINING_BALANCE'),
+                        label: const Text('Saldo Menurun'),
+                      ),
+                      ChoiceChip(
+                        selected: _depreciationMethod == 'NONE',
+                        onSelected: (_) => setState(() => _depreciationMethod = 'NONE'),
+                        label: const Text('Tanpa Penyusutan'),
+                      ),
+                    ],
+                  ),
+                  if (_depreciationMethod != 'NONE') ...[
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('Batas Bawah / Nilai Residu (Rp)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                              const SizedBox(height: 6),
+                              TextField(
+                                controller: _salvageValue,
+                                keyboardType: TextInputType.number,
+                                decoration: const InputDecoration(hintText: 'Mis: 2.000.000 (Batas Minimal)'),
+                                onChanged: (val) {
+                                  final formatted = formatMoneyInput(val);
+                                  if (formatted != val) {
+                                    _salvageValue.value = TextEditingValue(
+                                      text: formatted,
+                                      selection: TextSelection.collapsed(offset: formatted.length),
+                                    );
+                                  }
+                                  setState(() {});
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('Usia Manfaat (Tahun)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                              const SizedBox(height: 6),
+                              TextField(
+                                controller: _usefulLifeYears,
+                                keyboardType: TextInputType.number,
+                                decoration: const InputDecoration(hintText: 'Mis: 5 (Tahun)'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                   const SizedBox(height: 16),
 
                   Text(

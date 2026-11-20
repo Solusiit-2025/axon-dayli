@@ -986,23 +986,31 @@ class _LinkedDebtCard extends StatelessWidget {
   }
 }
 
-class _DepreciationCard extends StatelessWidget {
+class _DepreciationCard extends ConsumerWidget {
   const _DepreciationCard({required this.asset});
 
   final Asset asset;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final purchasePrice = asset.purchasePrice!;
     final purchaseDate = asset.purchaseAt!;
     final now = DateTime.now();
 
+    final int salvageValue = asset.salvageValue ?? (purchasePrice * 0.1).round();
+    final int usefulLifeYears = asset.usefulLifeMonths != null && asset.usefulLifeMonths! > 0
+        ? (asset.usefulLifeMonths! / 12).round()
+        : (asset.category == 'vehicle' ? 8 : (asset.category == 'electronics' ? 4 : 10));
+
     final yearsUsed = (now.difference(purchaseDate).inDays / 365.0).clamp(0.0, 50.0);
-    final int usefulLifeYears = (asset.category == 'VEHICLE' ? 8 : (asset.category == 'ELECTRONICS' ? 4 : 10));
-    final annualDepreciation = purchasePrice / usefulLifeYears;
-    final accumulatedDepreciation = (annualDepreciation * yearsUsed).clamp(0.0, purchasePrice.toDouble()).toInt();
-    final calculatedBookValue = (purchasePrice - accumulatedDepreciation).clamp(0, purchasePrice);
+    final depreciableBase = (purchasePrice - salvageValue).clamp(0, purchasePrice);
+
+    final double annualDepreciation = usefulLifeYears > 0 ? (depreciableBase / usefulLifeYears) : 0;
+    final int accumulatedDepreciation = (annualDepreciation * yearsUsed).clamp(0.0, depreciableBase.toDouble()).toInt();
+
+    final int calculatedBookValue = (purchasePrice - accumulatedDepreciation).clamp(salvageValue, purchasePrice);
+    final isStraightLine = asset.depreciationMethod != 'DECLINING_BALANCE';
 
     return Card(
       child: Padding(
@@ -1014,13 +1022,26 @@ class _DepreciationCard extends StatelessWidget {
               children: [
                 Icon(Icons.trending_down_rounded, color: Colors.orange.shade800, size: 18),
                 const SizedBox(width: 8),
-                Text(
-                  'Estimasi Penyusutan Nilai Aset (Depresiasi)',
-                  style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: Colors.orange.shade800),
+                Expanded(
+                  child: Text(
+                    'Penyusutan Otomatis (${isStraightLine ? 'Garis Lurus' : 'Saldo Menurun'})',
+                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: Colors.orange.shade800),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.shade800.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    'Batas Bawah ${formatCompactMoney(salvageValue)}',
+                    style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w700, color: Colors.orange.shade800),
+                  ),
                 ),
               ],
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -1044,9 +1065,41 @@ class _DepreciationCard extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              'Metode garis lurus (Straight-Line) estimasi usia manfaat $usefulLifeYears tahun · terpakai ${yearsUsed.toStringAsFixed(1)} tahun.',
+              'Metode ${isStraightLine ? 'Garis Lurus (Straight-Line)' : 'Saldo Menurun'} · Usia manfaat $usefulLifeYears tahun · Terpakai ${yearsUsed.toStringAsFixed(1)} tahun.',
               style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurfaceVariant),
             ),
+            if (asset.currentValue != calculatedBookValue) ...[
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    minimumSize: const Size(0, 32),
+                  ),
+                  onPressed: () async {
+                    final db = ref.read(databaseProvider);
+                    await db.saveAsset(AssetsCompanion(
+                      id: Value(asset.id),
+                      currentValue: Value(calculatedBookValue),
+                    ));
+                    await db.addValuation(
+                      workspaceId: asset.workspaceId,
+                      assetId: asset.id,
+                      value: calculatedBookValue,
+                      valuedAt: now,
+                      source: 'DEPRECIATION',
+                    );
+                    ref.read(syncSchedulerProvider).schedule();
+                    if (context.mounted) {
+                      showAppSnack(context, 'Nilai aset disesuaikan ke Nilai Buku ${formatMoney(calculatedBookValue)}!');
+                    }
+                  },
+                  icon: const Icon(Icons.sync_rounded, size: 14),
+                  label: Text('Terapkan Nilai Buku (${formatCompactMoney(calculatedBookValue)})', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
+                ),
+              ),
+            ],
           ],
         ),
       ),
