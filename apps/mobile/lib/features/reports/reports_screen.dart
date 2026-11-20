@@ -20,6 +20,7 @@ class ReportsScreen extends ConsumerWidget {
     final month = ref.watch(selectedMonthProvider);
     final summary = ref.watch(monthlySummaryProvider).valueOrNull;
     final balances = ref.watch(walletBalancesProvider).valueOrNull ?? const <WalletBalance>[];
+    final assets = ref.watch(assetsProvider).valueOrNull ?? const <Asset>[];
     final transactions = ref.watch(transactionsProvider).valueOrNull ?? const <Txn>[];
     final byCategory = ref.watch(expenseByCategoryProvider).valueOrNull ?? const <String, int>{};
     final categories = ref.watch(categoriesProvider('ALL')).valueOrNull ?? const <Category>[];
@@ -30,6 +31,7 @@ class ReportsScreen extends ConsumerWidget {
 
     final categoryMap = {for (final c in categories) c.id: c};
     final totalBalance = balances.fold<int>(0, (s, b) => s + b.balance);
+    final totalAssetValue = assets.where((a) => a.deletedAt == null && a.status == 'ACTIVE').fold<int>(0, (s, a) => s + a.currentValue);
     final income = summary?.income ?? 0;
     final expense = summary?.expense ?? 0;
     final net = summary?.net ?? 0;
@@ -93,6 +95,8 @@ class ReportsScreen extends ConsumerWidget {
               expense,
               net,
               totalBalance,
+              totalAssetValue,
+              payable,
               transactions,
               byCategory,
               categoryMap,
@@ -673,11 +677,14 @@ class ReportsScreen extends ConsumerWidget {
     int expense,
     int net,
     int totalBalance,
+    int totalAssetValue,
+    int payable,
     List<Txn> transactions,
     Map<String, int> byCategory,
     Map<String, Category> categoryMap,
   ) async {
     final monthName = formatMonthYear(month);
+    final totalNetWorth = totalBalance + totalAssetValue - payable;
 
     final sb = StringBuffer();
     sb.writeln('==========================================');
@@ -686,11 +693,17 @@ class ReportsScreen extends ConsumerWidget {
     sb.writeln('  Tanggal Cetak: ${formatDateFull(DateTime.now())}');
     sb.writeln('==========================================\n');
 
+    sb.writeln('--- POSISI KEKAYAAN BERSIH (NET WORTH) ---');
+    sb.writeln('Total Kas / Saldo Dompet  : ${formatMoney(totalBalance)}');
+    sb.writeln('Total Aset Terhitung      : ${formatMoney(totalAssetValue)} (Setelah Penyusutan)');
+    sb.writeln('Total Utang / Kewajiban   : -${formatMoney(payable)}');
+    sb.writeln('KEKAYAAN BERSIH (NET WORTH): ${formatMoney(totalNetWorth)}');
+    sb.writeln('');
+
     sb.writeln('--- RINGKASAN ARUS KAS ---');
-    sb.writeln('Total Saldo Dompet : ${formatMoney(totalBalance)}');
-    sb.writeln('Total Pemasukan    : ${formatMoney(income)}');
-    sb.writeln('Total Pengeluaran  : ${formatMoney(expense)}');
-    sb.writeln('Arus Kas Bersih    : ${formatMoney(net)}');
+    sb.writeln('Total Pemasukan           : ${formatMoney(income)}');
+    sb.writeln('Total Pengeluaran         : ${formatMoney(expense)}');
+    sb.writeln('Arus Kas Bersih           : ${formatMoney(net)}');
     sb.writeln('');
 
     sb.writeln('--- RINCIAN PENGELUARAN PER KATEGORI ---');

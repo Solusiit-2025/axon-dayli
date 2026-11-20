@@ -71,11 +71,26 @@ class _AssetEditorSheetState extends ConsumerState<_AssetEditorSheet> {
     _price = TextEditingController(text: a?.purchasePrice == null ? '' : formatNumber(a!.purchasePrice!));
     _value = TextEditingController(text: a == null ? '' : formatNumber(a.currentValue));
     _salvageValue = TextEditingController(text: a?.salvageValue == null ? '' : formatNumber(a!.salvageValue!));
-    _usefulLifeYears = TextEditingController(text: a?.usefulLifeMonths == null ? '5' : (a!.usefulLifeMonths! / 12).round().toString());
-    _note = TextEditingController(text: a?.note ?? '');
     _category = a?.category ?? 'electronics';
     _status = a?.status ?? 'ACTIVE';
-    _depreciationMethod = a?.depreciationMethod ?? 'STRAIGHT_LINE';
+
+    if (a == null) {
+      if (_category == 'property' || _category == 'investment') {
+        _depreciationMethod = 'APPRECIATION';
+        _usefulLifeYears = TextEditingController(text: '20');
+      } else if (_category == 'vehicle') {
+        _depreciationMethod = 'STRAIGHT_LINE';
+        _usefulLifeYears = TextEditingController(text: '8');
+      } else {
+        _depreciationMethod = 'STRAIGHT_LINE';
+        _usefulLifeYears = TextEditingController(text: '4');
+      }
+    } else {
+      _depreciationMethod = a.depreciationMethod;
+      _usefulLifeYears = TextEditingController(text: a.usefulLifeMonths == null ? '5' : (a.usefulLifeMonths! / 12).round().toString());
+    }
+
+    _note = TextEditingController(text: a?.note ?? '');
     _debtId = a?.debtId;
     _purchaseAt = a?.purchaseAt;
 
@@ -362,17 +377,29 @@ class _AssetEditorSheetState extends ConsumerState<_AssetEditorSheet> {
           updatedAt: now,
           deviceId: '',
         ));
-        if (value > 0) {
+        if (price > 0) {
+          try {
+            await db.addValuation(
+              workspaceId: ws.id,
+              assetId: saved.id,
+              value: price,
+              valuedAt: _purchaseAt ?? now,
+              source: 'PURCHASE',
+              note: 'Harga Perolehan / Beli',
+            );
+          } catch (_) {}
+        }
+        if (value > 0 && value != price) {
           try {
             await db.addValuation(
               workspaceId: ws.id,
               assetId: saved.id,
               value: value,
-              valuedAt: _purchaseAt ?? now,
+              valuedAt: now,
+              source: 'MANUAL',
+              note: 'Valuasi Pasar Terkini',
             );
-          } catch (_) {
-            // Riwayat nilai gagal dibuat, tetapi aset sudah tersimpan.
-          }
+          } catch (_) {}
         }
       } else {
         await db.saveAsset(AssetsCompanion(
@@ -584,29 +611,37 @@ class _AssetEditorSheetState extends ConsumerState<_AssetEditorSheet> {
 
                   const Divider(height: 1),
                   const SizedBox(height: 14),
-                  const Text('Metode & Pengaturan Penyusutan Otomatis', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+                  const Text('Dinamika Perubahan Nilai Aset', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
                   const SizedBox(height: 8),
                   Wrap(
                     spacing: 8,
+                    runSpacing: 8,
                     children: [
                       ChoiceChip(
                         selected: _depreciationMethod == 'STRAIGHT_LINE',
                         onSelected: (_) => setState(() => _depreciationMethod = 'STRAIGHT_LINE'),
-                        label: const Text('Garis Lurus (Straight-Line)'),
+                        avatar: const Icon(Icons.trending_down_rounded, size: 14, color: Colors.deepOrange),
+                        label: const Text('Penyusutan Garis Lurus (Kendaraan/Gadget)'),
+                      ),
+                      ChoiceChip(
+                        selected: _depreciationMethod == 'APPRECIATION',
+                        onSelected: (_) => setState(() => _depreciationMethod = 'APPRECIATION'),
+                        avatar: const Icon(Icons.trending_up_rounded, size: 14, color: Color(0xFF059669)),
+                        label: const Text('Pertambahan Nilai / Apresiasi (Properti/Investasi)'),
                       ),
                       ChoiceChip(
                         selected: _depreciationMethod == 'DECLINING_BALANCE',
                         onSelected: (_) => setState(() => _depreciationMethod = 'DECLINING_BALANCE'),
-                        label: const Text('Saldo Menurun'),
+                        label: const Text('Penyusutan Saldo Menurun'),
                       ),
                       ChoiceChip(
                         selected: _depreciationMethod == 'NONE',
                         onSelected: (_) => setState(() => _depreciationMethod = 'NONE'),
-                        label: const Text('Tanpa Penyusutan'),
+                        label: const Text('Nilai Tetap / Stabil'),
                       ),
                     ],
                   ),
-                  if (_depreciationMethod != 'NONE') ...[
+                  if (_depreciationMethod == 'STRAIGHT_LINE' || _depreciationMethod == 'DECLINING_BALANCE') ...[
                     const SizedBox(height: 12),
                     Row(
                       children: [
@@ -650,6 +685,28 @@ class _AssetEditorSheetState extends ConsumerState<_AssetEditorSheet> {
                           ),
                         ),
                       ],
+                    ),
+                  ] else if (_depreciationMethod == 'APPRECIATION') ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF059669).withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: const Color(0xFF059669).withValues(alpha: 0.3)),
+                      ),
+                      child: const Row(
+                        children: [
+                          Icon(Icons.trending_up_rounded, color: Color(0xFF059669), size: 20),
+                          SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              'Aset Properti / Investasi cenderung mengalami Pertambahan Nilai (Capital Gain). Aplikasi akan menghitung akumulasi keuntungan bersih secara otomatis.',
+                              style: TextStyle(fontSize: 11, color: Color(0xFF059669), height: 1.3),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                   const SizedBox(height: 16),

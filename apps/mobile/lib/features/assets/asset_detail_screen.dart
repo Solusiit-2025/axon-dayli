@@ -106,15 +106,21 @@ class AssetDetailScreen extends ConsumerWidget {
                     formatMoney(asset.currentValue),
                     style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: -0.8),
                   ),
-                  if (gain != null) ...[
+                  if (gain != null && asset.purchasePrice != null && asset.purchasePrice! > 0) ...[
                     const SizedBox(height: 6),
-                    Text(
-                      '${gain >= 0 ? '+' : ''}${formatMoney(gain)} dari harga beli',
-                      style: TextStyle(
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w600,
-                        color: gain >= 0 ? kIncome : kExpense,
-                      ),
+                    Row(
+                      children: [
+                        Icon(gain >= 0 ? Icons.trending_up_rounded : Icons.trending_down_rounded, size: 16, color: gain >= 0 ? kIncome : kExpense),
+                        const SizedBox(width: 4),
+                        Text(
+                          '${gain >= 0 ? '+' : ''}${formatMoney(gain)} (${gain >= 0 ? '+' : ''}${((gain / asset.purchasePrice!) * 100).toStringAsFixed(1)}%) dari harga beli',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: gain >= 0 ? kIncome : kExpense,
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                   const SizedBox(height: 14),
@@ -267,21 +273,37 @@ class AssetDetailScreen extends ConsumerWidget {
               ),
             ),
 
-          // Riwayat & Input Perawatan / Service
+          // Riwayat & Input Perawatan / Service (FR-01 Dinamika Label)
           SectionHeader(
-            title: 'Riwayat & Jadwal Perawatan',
+            title: asset.category == 'property'
+                ? 'Riwayat Renovasi & Pajak PBB'
+                : (asset.category == 'electronics' || asset.category == 'equipment'
+                    ? 'Riwayat Maintenance & Garansi'
+                    : (asset.category == 'investment' ? 'Riwayat Catatan Investasi' : 'Riwayat & Jadwal Perawatan')),
             action: Wrap(
               spacing: 4,
               children: [
                 TextButton.icon(
                   onPressed: () => _addTaxReminder(context, ref, asset),
-                  icon: const Icon(Icons.alarm_add_rounded, size: 15, color: Color(0xFFD97706)),
-                  label: const Text('Pajak STNK', style: TextStyle(fontSize: 11.5, color: Color(0xFFD97706))),
+                  icon: Icon(
+                    asset.category == 'property' ? Icons.home_work_outlined : Icons.alarm_add_rounded,
+                    size: 15,
+                    color: const Color(0xFFD97706),
+                  ),
+                  label: Text(
+                    asset.category == 'property'
+                        ? 'Pajak PBB'
+                        : (asset.category == 'electronics' ? 'Garansi' : 'Pajak STNK'),
+                    style: const TextStyle(fontSize: 11.5, color: Color(0xFFD97706)),
+                  ),
                 ),
                 TextButton.icon(
                   onPressed: () => _addMaintenance(context, ref, asset),
                   icon: const Icon(Icons.build_circle_outlined, size: 15),
-                  label: const Text('Service', style: TextStyle(fontSize: 11.5)),
+                  label: Text(
+                    asset.category == 'property' ? 'Renovasi' : 'Service',
+                    style: const TextStyle(fontSize: 11.5),
+                  ),
                 ),
               ],
             ),
@@ -294,13 +316,15 @@ class AssetDetailScreen extends ConsumerWidget {
                   children: [
                     Icon(Icons.build_outlined, size: 36, color: theme.colorScheme.outline),
                     const SizedBox(height: 8),
-                    const Text(
-                      'Belum ada riwayat service',
-                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                    Text(
+                      asset.category == 'property' ? 'Belum ada riwayat renovasi / perbaikan' : 'Belum ada riwayat service',
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'Catat jadwal perawatan berkala, biaya teknisi, atau perbaikan aset.',
+                      asset.category == 'property'
+                          ? 'Catat pengeluaran renovasi bangunan, perbaikan atap, atau perawatan berkala.'
+                          : 'Catat jadwal perawatan berkala, biaya teknisi, atau perbaikan aset.',
                       textAlign: TextAlign.center,
                       style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                     ),
@@ -308,7 +332,10 @@ class AssetDetailScreen extends ConsumerWidget {
                     FilledButton.tonalIcon(
                       onPressed: () => _addMaintenance(context, ref, asset),
                       icon: const Icon(Icons.add, size: 16),
-                      label: const Text('Input Service Pertama'),
+                      label: Text(
+                        asset.category == 'property' ? 'Input Renovasi Pertama' : 'Input Service Pertama',
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
                     ),
                   ],
                 ),
@@ -394,11 +421,13 @@ class AssetDetailScreen extends ConsumerWidget {
               const SizedBox(height: 12),
               OutlinedButton.icon(
                 onPressed: () async {
+                  final firstAllowed = asset.purchaseAt ?? DateTime(1950);
                   final picked = await showDatePicker(
                     context: context,
-                    initialDate: date,
-                    firstDate: DateTime(2000),
-                    lastDate: DateTime.now(),
+                    initialDate: date.isBefore(firstAllowed) ? firstAllowed : date,
+                    firstDate: firstAllowed,
+                    lastDate: DateTime.now().add(const Duration(days: 365)),
+                    helpText: 'Tanggal Valuasi Pasar Terkini',
                   );
                   if (picked != null) setState(() => date = picked);
                 },
@@ -998,6 +1027,88 @@ class _DepreciationCard extends ConsumerWidget {
     final purchaseDate = asset.purchaseAt!;
     final now = DateTime.now();
 
+    final isAppreciation = asset.depreciationMethod == 'APPRECIATION' || asset.category == 'property' || asset.category == 'investment';
+
+    if (isAppreciation) {
+      final gain = asset.currentValue - purchasePrice;
+      final percentGain = purchasePrice > 0 ? ((gain / purchasePrice) * 100) : 0.0;
+      final yearsHeld = (now.difference(purchaseDate).inDays / 365.0).clamp(0.1, 50.0);
+      final cagrPercent = (percentGain / yearsHeld).clamp(-100.0, 500.0);
+
+      final color = gain >= 0 ? const Color(0xFF059669) : Colors.red.shade700;
+
+      return Card(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: color.withValues(alpha: 0.3)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(gain >= 0 ? Icons.trending_up_rounded : Icons.trending_down_rounded, color: color, size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Pertambahan Nilai Aset (Apresiasi / Capital Gain)',
+                      style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: color),
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: color.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      '${gain >= 0 ? '+' : ''}${percentGain.toStringAsFixed(1)}%',
+                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: color),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Capital Gain (Keuntungan)', style: TextStyle(fontSize: 10.5, color: theme.colorScheme.onSurfaceVariant)),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${gain >= 0 ? '+' : ''}${formatMoney(gain)}',
+                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w900, color: color),
+                      ),
+                    ],
+                  ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text('Pertumbuhan / Tahun', style: TextStyle(fontSize: 10.5, color: theme.colorScheme.onSurfaceVariant)),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${cagrPercent >= 0 ? '+' : ''}${cagrPercent.toStringAsFixed(1)}%/thn',
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: color),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Aset properti/investasi ini telah dimiliki selama ${yearsHeld.toStringAsFixed(1)} tahun. Harga perolehan awal ${formatMoney(purchasePrice)}.',
+                style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurfaceVariant),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     final int salvageValue = asset.salvageValue ?? (purchasePrice * 0.1).round();
     final int usefulLifeYears = asset.usefulLifeMonths != null && asset.usefulLifeMonths! > 0
         ? (asset.usefulLifeMonths! / 12).round()
@@ -1078,6 +1189,26 @@ class _DepreciationCard extends ConsumerWidget {
                     minimumSize: const Size(0, 32),
                   ),
                   onPressed: () async {
+                    if (asset.currentValue > calculatedBookValue) {
+                      final confirm = await showDialog<bool>(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          title: const Text('Konfirmasi Menimpa Nilai Pasar'),
+                          content: Text('Nilai pasar aset saat ini (${formatMoney(asset.currentValue)}) lebih tinggi dari Nilai Buku Penyusutan (${formatMoney(calculatedBookValue)}).\n\nApakah Anda yakin ingin menimpa nilai pasar aset ini ke Nilai Buku Penyusutan?'),
+                          actions: [
+                            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Batal')),
+                            FilledButton(
+                              style: FilledButton.styleFrom(backgroundColor: Colors.orange.shade800),
+                              onPressed: () => Navigator.pop(ctx, true),
+                              child: const Text('Ya, Terapkan Nilai Buku'),
+                            ),
+                          ],
+                        ),
+                      );
+
+                      if (confirm != true) return;
+                    }
+
                     final db = ref.read(databaseProvider);
                     await db.saveAsset(AssetsCompanion(
                       id: Value(asset.id),
