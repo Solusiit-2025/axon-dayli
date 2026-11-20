@@ -46,8 +46,8 @@ class _InvoicesScreenState extends ConsumerState<InvoicesScreen> {
       
       // Fetch invoices & banks in parallel
       final res = await Future.wait([
-        client.get('/axon/invoices?full=1&limit=100'),
-        client.get('/axon/banks'),
+        client.get('/api/axon/invoices?full=1&limit=100'),
+        client.get('/api/axon/banks'),
       ]);
 
       final invRes = res[0];
@@ -581,7 +581,7 @@ class _InvoiceCard extends ConsumerWidget {
                               };
 
                               final client = ref.read(apiClientProvider);
-                              await client.post('/axon/invoices/$invoiceId/payments', payload);
+                              await client.post('/api/axon/invoices/$invoiceId/payments', payload);
 
                               if (ctx.mounted) {
                                 Navigator.pop(ctx);
