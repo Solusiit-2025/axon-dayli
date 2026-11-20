@@ -20,12 +20,14 @@ class FinanceScreen extends ConsumerWidget {
     final month = ref.watch(selectedMonthProvider);
     final summary = ref.watch(monthlySummaryProvider).valueOrNull;
     final balances = ref.watch(walletBalancesProvider).valueOrNull ?? const <WalletBalance>[];
+    final wallets = ref.watch(walletsProvider).valueOrNull ?? const <Wallet>[];
     final transactions = ref.watch(transactionsProvider).valueOrNull ?? const <Txn>[];
     final byCategory = ref.watch(expenseByCategoryProvider).valueOrNull ?? const <String, int>{};
     final categories = ref.watch(categoriesProvider('ALL')).valueOrNull ?? const <Category>[];
 
     final total = balances.fold<int>(0, (s, b) => s + b.balance);
     final categoryMap = {for (final c in categories) c.id: c};
+    final walletMap = {for (final w in wallets) w.id: w};
 
     String categoryName(String? id) => id == null ? 'Tanpa kategori' : (categoryMap[id]?.name ?? 'Tanpa kategori');
 
@@ -361,9 +363,41 @@ class FinanceScreen extends ConsumerWidget {
                                 color: entry.value[i].type == 'INCOME' ? kIncome : kExpense,
                               ),
                             ),
-                            title: Text(
-                              categoryName(entry.value[i].categoryId),
-                              style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
+                            title: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    categoryName(entry.value[i].categoryId),
+                                    style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
+                                  ),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.6),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        _walletIcon(walletMap[entry.value[i].walletId]?.type),
+                                        size: 10,
+                                        color: theme.colorScheme.primary,
+                                      ),
+                                      const SizedBox(width: 3),
+                                      Text(
+                                        walletMap[entry.value[i].walletId]?.name ?? 'Dompet',
+                                        style: TextStyle(
+                                          fontSize: 9.5,
+                                          fontWeight: FontWeight.w700,
+                                          color: theme.colorScheme.primary,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
                             ),
                             subtitle: Row(
                               children: [
@@ -442,6 +476,19 @@ class FinanceScreen extends ConsumerWidget {
     if (hex == null) return const Color(0xFF94A3B8);
     final value = int.tryParse(hex.replaceAll('#', ''), radix: 16) ?? 0x94A3B8;
     return Color(0xFF000000 | value);
+  }
+
+  static IconData _walletIcon(String? type) {
+    switch (type) {
+      case 'BANK':
+        return Icons.account_balance_outlined;
+      case 'EWALLET':
+        return Icons.smartphone_outlined;
+      case 'CREDIT':
+        return Icons.credit_card_outlined;
+      default:
+        return Icons.payments_outlined;
+    }
   }
 }
 
