@@ -697,13 +697,31 @@ class _TransactionEditorSheetState
                     const SizedBox(height: 16),
 
                     if (_type != 'TRANSFER') ...[
-                      Text(
-                        'Kategori',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            'Kategori',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                          InkWell(
+                            onTap: () => _showAddCategoryDialog(context, _type),
+                            child: Row(
+                              children: [
+                                Icon(Icons.add_circle_outline_rounded, size: 14, color: theme.colorScheme.primary),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'Tambah Kategori',
+                                  style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: theme.colorScheme.primary),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
                       const SizedBox(height: 8),
                       if (categories.isEmpty)
@@ -1094,6 +1112,115 @@ class _TransactionEditorSheetState
                   ),
                 ),
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showAddCategoryDialog(BuildContext context, String currentType) async {
+    final nameController = TextEditingController();
+    String selectedColor = '#2563EB';
+    String kind = currentType == 'INCOME' ? 'INCOME' : 'EXPENSE';
+
+    final colors = ['#2563EB', '#10B981', '#7C3AED', '#D97706', '#EF4444', '#06B6D4', '#EC4899', '#64748B'];
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setState) => AlertDialog(
+          title: const Text('Tambah Kategori Keuangan'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: nameController,
+                autofocus: true,
+                textCapitalization: TextCapitalization.words,
+                decoration: const InputDecoration(
+                  labelText: 'Nama Kategori Baru *',
+                  hintText: 'Misal: Pendidikan, Perjalanan, Kesehatan',
+                ),
+              ),
+              const SizedBox(height: 14),
+              const Text('Tipe Kategori', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 8,
+                children: [
+                  ChoiceChip(
+                    selected: kind == 'EXPENSE',
+                    onSelected: (_) => setState(() => kind = 'EXPENSE'),
+                    label: const Text('Pengeluaran'),
+                  ),
+                  ChoiceChip(
+                    selected: kind == 'INCOME',
+                    onSelected: (_) => setState(() => kind = 'INCOME'),
+                    label: const Text('Pemasukan'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              const Text('Warna Badge', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                children: [
+                  for (final hex in colors)
+                    InkWell(
+                      onTap: () => setState(() => selectedColor = hex),
+                      child: Container(
+                        width: 28,
+                        height: 28,
+                        decoration: BoxDecoration(
+                          color: _parseColor(hex),
+                          shape: BoxShape.circle,
+                          border: selectedColor == hex ? Border.all(color: Colors.white, width: 3) : null,
+                          boxShadow: selectedColor == hex
+                              ? [BoxShadow(color: _parseColor(hex).withValues(alpha: 0.5), blurRadius: 6)]
+                              : null,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
+            FilledButton(
+              onPressed: () async {
+                final catName = nameController.text.trim();
+                if (catName.isEmpty) return;
+
+                final ws = ref.read(currentWorkspaceProvider);
+                if (ws == null) return;
+
+                final db = ref.read(databaseProvider);
+                final newCat = await db.saveCategory(CategoriesCompanion.insert(
+                  id: newId(),
+                  workspaceId: ws.id,
+                  name: catName,
+                  kind: kind,
+                  color: Value(selectedColor),
+                  createdAt: DateTime.now(),
+                  updatedAt: DateTime.now(),
+                  deviceId: '',
+                ));
+
+                ref.read(syncSchedulerProvider).schedule();
+
+                if (ctx.mounted) {
+                  Navigator.pop(ctx);
+                  this.setState(() {
+                    _categoryId = newCat.id;
+                  });
+                  showAppSnack(context, 'Kategori "$catName" berhasil ditambahkan!');
+                }
+              },
+              child: const Text('Simpan Kategori'),
             ),
           ],
         ),

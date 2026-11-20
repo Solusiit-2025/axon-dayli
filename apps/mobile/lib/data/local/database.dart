@@ -668,6 +668,52 @@ class AppDatabase extends _$AppDatabase {
     return q.get();
   }
 
+  Future<Category> saveCategory(CategoriesCompanion input) async {
+    final dev = await deviceId();
+    final now = DateTime.now();
+    final id = input.id.value;
+    final existing = await (select(categories)..where((t) => t.id.equals(id))).getSingleOrNull();
+
+    final row = CategoriesCompanion(
+      id: Value(id),
+      workspaceId: existing != null
+          ? Value(existing.workspaceId)
+          : (input.workspaceId.present ? input.workspaceId : const Value('')),
+      name: input.name.present ? input.name : Value(existing?.name ?? 'Kategori'),
+      kind: input.kind.present ? input.kind : Value(existing?.kind ?? 'EXPENSE'),
+      parentId: input.parentId.present ? input.parentId : Value(existing?.parentId),
+      icon: input.icon.present ? input.icon : Value(existing?.icon ?? 'label'),
+      color: input.color.present ? input.color : Value(existing?.color ?? '#64748B'),
+      createdAt: Value(existing?.createdAt ?? now),
+      updatedAt: Value(now),
+      deletedAt: Value(existing?.deletedAt),
+      version: Value((existing?.version ?? 0) + 1),
+      deviceId: Value(dev),
+      syncedAt: const Value(null),
+    );
+
+    await into(categories).insertOnConflictUpdate(row);
+    final saved = await (select(categories)..where((t) => t.id.equals(id))).getSingle();
+    await _enqueue('category', id, categoryToWire(saved));
+    return saved;
+  }
+
+  Future<void> deleteCategory(String id) async {
+    final row = await (select(categories)..where((t) => t.id.equals(id))).getSingleOrNull();
+    if (row == null) return;
+    final dev = await deviceId();
+    final now = DateTime.now();
+    final updated = row.copyWith(
+      deletedAt: Value(now),
+      updatedAt: now,
+      version: row.version + 1,
+      deviceId: dev,
+      syncedAt: const Value(null),
+    );
+    await (update(categories)..where((t) => t.id.equals(id))).write(updated);
+    await _enqueue('category', id, categoryToWire(updated));
+  }
+
   Stream<List<Txn>> watchTransactions(String workspaceId, DateTime from, DateTime to) {
     return (select(transactions)
           ..where((t) =>
