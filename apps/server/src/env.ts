@@ -10,6 +10,8 @@ const schema = z.object({
   HOST: z.string().default('0.0.0.0'),
   CORS_ORIGIN: z.string().default('*'),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  AXON_WEB_BASE_URL: z.string().default('https://axon.solusiit.id'),
+  AXON_WEB_API_KEY: z.string().optional(),
 });
 
 export const env = schema.parse(process.env);

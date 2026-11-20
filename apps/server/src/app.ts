@@ -10,6 +10,7 @@ import authRoutes from './routes/auth.js';
 import workspaceRoutes from './routes/workspaces.js';
 import syncRoutes from './routes/sync.js';
 import reportRoutes from './routes/reports.js';
+import axonRoutes from './routes/axon.js';
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -82,6 +83,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(workspaceRoutes);
   await app.register(syncRoutes);
   await app.register(reportRoutes);
+  await app.register(axonRoutes);
 
   return app;
 }

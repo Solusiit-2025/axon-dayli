@@ -9,6 +9,7 @@ import '../features/calendar/calendar_screen.dart';
 import '../features/documents/documents_screen.dart';
 import '../features/finance/finance_screen.dart';
 import '../features/finance/wallets_screen.dart';
+import '../features/invoices/invoices_screen.dart';
 import '../features/planning/planning_screen.dart';
 import '../features/reminders/reminders_screen.dart';
 import '../features/reports/reports_screen.dart';
@@ -89,6 +90,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/planning', builder: (_, __) => const PlanningScreen()),
       GoRoute(path: '/reports', builder: (_, __) => const ReportsScreen()),
       GoRoute(path: '/documents', builder: (_, __) => const DocumentsScreen()),
+      GoRoute(path: '/invoices', builder: (_, __) => const InvoicesScreen()),
       GoRoute(
         path: '/task/:id',
         builder: (_, state) =>
