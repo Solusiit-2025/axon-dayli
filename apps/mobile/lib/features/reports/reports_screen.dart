@@ -301,6 +301,17 @@ class ReportsScreen extends ConsumerWidget {
             ),
           ),
 
+          const SizedBox(height: 14),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: _SurvivalAnalysisCard(
+              totalBalance: totalBalance,
+              income: income,
+              expense: expense,
+              debts: debts,
+            ),
+          ),
+
           // 2. INSIGHTS AI ANALISIS PINTAR (Jika ada)
           if (insights.isNotEmpty) ...[
             const SectionHeader(title: 'Analisis & Rekomendasi Pintar'),
@@ -789,6 +800,318 @@ class _CategoryExpenseRow extends StatelessWidget {
         const SizedBox(height: 4),
         ProgressBar(value: percent / 100, color: color),
       ],
+    );
+  }
+}
+
+class _SurvivalAnalysisCard extends StatelessWidget {
+  const _SurvivalAnalysisCard({
+    required this.totalBalance,
+    required this.income,
+    required this.expense,
+    required this.debts,
+  });
+
+  final int totalBalance;
+  final int income;
+  final int expense;
+  final List<Debt> debts;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    // Hitung total cicilan utang bulanan (Payable & remaining > 0)
+    final activeDebts = debts.where((d) => d.deletedAt == null && d.remaining > 0 && d.direction == 'PAYABLE').toList();
+    final monthlyDebtService = activeDebts.fold<int>(0, (sum, d) {
+      if (d.monthlyInstallment != null && d.monthlyInstallment! > 0) {
+        return sum + d.monthlyInstallment!;
+      }
+      return sum + (d.remaining / 12).round();
+    });
+
+    final totalMonthlyOutflow = expense + monthlyDebtService;
+    final monthlyNetCashflow = income - totalMonthlyOutflow;
+
+    // Proyeksi Cash Balance (1 Bulan, 3 Bulan, 1 Tahun / 12 Bulan)
+    final proj1M = totalBalance + (monthlyNetCashflow * 1);
+    final proj3M = totalBalance + (monthlyNetCashflow * 3);
+    final proj12M = totalBalance + (monthlyNetCashflow * 12);
+
+    // Daya tahan saldo (Runway Months) jika tidak ada pemasukan
+    final double runwayMonths = totalMonthlyOutflow > 0 ? (totalBalance / totalMonthlyOutflow) : 99.0;
+
+    // Beban Cicilan Utang terhadap Pemasukan (Debt Service Ratio)
+    final double debtRatio = income > 0 ? ((monthlyDebtService / income) * 100) : 0.0;
+
+    // Evaluasi Status Ketahanan Keuangan (Survive Status)
+    String statusTitle;
+    String statusDesc;
+    Color statusColor;
+    IconData statusIcon;
+
+    if (monthlyNetCashflow < 0) {
+      statusTitle = '🔴 KRITIS / DEFISIT KAS (Risiko Tidak Survive)';
+      statusColor = Colors.red.shade700;
+      statusIcon = Icons.warning_amber_rounded;
+      statusDesc = 'Keuangan Anda defisit ${formatMoney(monthlyNetCashflow.abs())}/bulan! Saldo kas diproyeksikan habis dalam ${runwayMonths < 1 ? 'kurang dari 1 bulan' : '${runwayMonths.toStringAsFixed(1)} bulan'} jika tidak ada penghematan atau pemasukan tambahan.';
+    } else if (runwayMonths < 3.0 || debtRatio > 40.0) {
+      statusTitle = '🟧 WASPADA (Daya Tahan Rentan)';
+      statusColor = Colors.orange.shade800;
+      statusIcon = Icons.error_outline_rounded;
+      statusDesc = 'Keuangan Anda surplus ${formatMoney(monthlyNetCashflow)}/bulan, namun cadangan kas hanya mampu bertahan ${runwayMonths.toStringAsFixed(1)} bulan dan beban cicilan utang mengambil ${debtRatio.toStringAsFixed(1)}% dari pemasukan.';
+    } else {
+      statusTitle = '🟢 SANGAT SEHAT & SURVIVE (Aman)';
+      statusColor = const Color(0xFF059669);
+      statusIcon = Icons.verified_user_rounded;
+      statusDesc = 'Keuangan Anda SANGAT SEHAT! Memiliki surplus kas ${formatMoney(monthlyNetCashflow)}/bulan, beban utang ideal (${debtRatio.toStringAsFixed(1)}%), dan dana darurat bertahan hingga ${runwayMonths >= 24 ? '2+ tahun' : '${runwayMonths.toStringAsFixed(1)} bulan'}.';
+    }
+
+    return Card(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+        side: BorderSide(color: statusColor.withValues(alpha: 0.3)),
+      ),
+      child: Container(
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          gradient: LinearGradient(
+            colors: [
+              statusColor.withValues(alpha: 0.08),
+              theme.colorScheme.surface,
+            ],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: statusColor.withValues(alpha: 0.15),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(statusIcon, color: statusColor, size: 20),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'ANALISIS KETAHANAN KEUANGAN (SURVIVAL)',
+                        style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, letterSpacing: 0.3),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        statusTitle,
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: statusColor),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Text(
+              statusDesc,
+              style: TextStyle(fontSize: 11.5, height: 1.4, color: theme.colorScheme.onSurfaceVariant),
+            ),
+            const SizedBox(height: 16),
+            const Divider(height: 1),
+            const SizedBox(height: 14),
+
+            // Grid Proyeksi Saldo (1 Bulan, 3 Bulan, 1 Tahun)
+            const Text(
+              'Proyeksi Saldo Kas Masa Depan',
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: _ProjectionTile(
+                    label: '1 Bulan',
+                    amount: proj1M,
+                    net: monthlyNetCashflow * 1,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: _ProjectionTile(
+                    label: '3 Bulan',
+                    amount: proj3M,
+                    net: monthlyNetCashflow * 3,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: _ProjectionTile(
+                    label: '1 Tahun (12B)',
+                    amount: proj12M,
+                    net: monthlyNetCashflow * 12,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            const Divider(height: 1),
+            const SizedBox(height: 14),
+
+            // Indikator Beban Utang & Daya Tahan Saldo
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Beban Cicilan Utang Bulanan', style: TextStyle(fontSize: 10.5, color: theme.colorScheme.onSurfaceVariant)),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${formatMoney(monthlyDebtService)} (${debtRatio.toStringAsFixed(1)}%)',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w700,
+                        color: debtRatio > 40 ? Colors.red.shade700 : theme.colorScheme.onSurface,
+                      ),
+                    ),
+                  ],
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text('Daya Tahan Dana Darurat', style: TextStyle(fontSize: 10.5, color: theme.colorScheme.onSurfaceVariant)),
+                    const SizedBox(height: 2),
+                    Text(
+                      runwayMonths >= 24 ? '2+ Tahun' : '${runwayMonths.toStringAsFixed(1)} Bulan',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w700,
+                        color: runwayMonths < 3 ? Colors.red.shade700 : const Color(0xFF059669),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+
+            // Tabel Estimasi Pelunasan Utang (Jika ada utang aktif)
+            if (activeDebts.isNotEmpty) ...[
+              const SizedBox(height: 14),
+              const Divider(height: 1),
+              const SizedBox(height: 12),
+              const Text(
+                'Estimasi Jadwal Pelunasan Utang & Angsuran',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 8),
+              for (final d in activeDebts) ...[
+                () {
+                  final inst = d.monthlyInstallment ?? (d.remaining / 12).round();
+                  final int monthsLeft = inst > 0 ? (d.remaining / inst).ceil() : 12;
+                  final payoffDate = DateTime.now().add(Duration(days: monthsLeft * 30));
+
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 6),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.payment_rounded, size: 16, color: Colors.orange.shade800),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(d.counterparty, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                              Text(
+                                'Sisa ${formatMoney(d.remaining)} · Cicilan ${formatMoney(inst)}/bln',
+                                style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurfaceVariant),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text(
+                              'Estimasi Lunas',
+                              style: TextStyle(fontSize: 9.5, color: theme.colorScheme.onSurfaceVariant),
+                            ),
+                            Text(
+                              '${formatMonthYear(payoffDate)} ($monthsLeft bln)',
+                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF059669)),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  );
+                }(),
+              ],
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ProjectionTile extends StatelessWidget {
+  const _ProjectionTile({
+    required this.label,
+    required this.amount,
+    required this.net,
+  });
+
+  final String label;
+  final int amount;
+  final int net;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isPos = net >= 0;
+
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: theme.dividerColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurfaceVariant, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 4),
+          Text(
+            formatCompactMoney(amount),
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w900,
+              color: amount < 0 ? kExpense : theme.colorScheme.onSurface,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            '${isPos ? '+' : ''}${formatCompactMoney(net)}',
+            style: TextStyle(
+              fontSize: 9.5,
+              fontWeight: FontWeight.w700,
+              color: isPos ? kIncome : kExpense,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
