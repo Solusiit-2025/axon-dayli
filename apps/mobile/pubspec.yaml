@@ -1,7 +1,7 @@
 name: daily_pilot
 description: "Axon Dayli — kegiatan harian, keuangan, dan aset. Offline-first."
 publish_to: "none"
-version: 1.0.0+1
+version: 1.0.1+2002
 
 environment:
   sdk: ">=3.11.0 <4.0.0"

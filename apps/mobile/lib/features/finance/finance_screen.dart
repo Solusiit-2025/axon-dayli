@@ -1,3 +1,5 @@
+import 'dart:ui' show FontFeature;
+
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -24,6 +26,7 @@ class FinanceScreen extends ConsumerWidget {
     final transactions = ref.watch(transactionsProvider).valueOrNull ?? const <Txn>[];
     final byCategory = ref.watch(expenseByCategoryProvider).valueOrNull ?? const <String, int>{};
     final categories = ref.watch(categoriesProvider('ALL')).valueOrNull ?? const <Category>[];
+    final viewMode = ref.watch(transactionsViewModeProvider);
 
     final total = balances.fold<int>(0, (s, b) => s + b.balance);
     final categoryMap = {for (final c in categories) c.id: c};
@@ -306,10 +309,25 @@ class FinanceScreen extends ConsumerWidget {
 
         SectionHeader(
           title: 'Transaksi',
-          action: TextButton.icon(
-            onPressed: () => showTransactionEditor(context, ref),
-            icon: const Icon(Icons.add, size: 16),
-            label: const Text('Catat'),
+          action: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                tooltip: viewMode == 'list' ? 'Tampilan tabel' : 'Tampilan daftar',
+                onPressed: () => ref.read(transactionsViewModeProvider.notifier).state =
+                    viewMode == 'list' ? 'table' : 'list',
+                icon: Icon(
+                  viewMode == 'list' ? Icons.table_rows_outlined : Icons.view_agenda_outlined,
+                  size: 19,
+                ),
+                visualDensity: VisualDensity.compact,
+              ),
+              TextButton.icon(
+                onPressed: () => showTransactionEditor(context, ref),
+                icon: const Icon(Icons.add, size: 16),
+                label: const Text('Catat'),
+              ),
+            ],
           ),
         ),
 
@@ -327,6 +345,13 @@ class FinanceScreen extends ConsumerWidget {
                 ),
               ),
             ),
+          )
+        else if (viewMode == 'table')
+          _TransactionTable(
+            transactions: transactions,
+            categoryName: categoryName,
+            categoryColor: (id) => _colorFor(id ?? '', categoryMap),
+            onTap: (t) => showTransactionEditor(context, ref, existing: t),
           )
         else
           for (final entry in grouped.entries)
@@ -489,6 +514,154 @@ class FinanceScreen extends ConsumerWidget {
       default:
         return Icons.payments_outlined;
     }
+  }
+}
+
+class _TransactionTable extends StatelessWidget {
+  const _TransactionTable({
+    required this.transactions,
+    required this.categoryName,
+    required this.categoryColor,
+    required this.onTap,
+  });
+
+  final List<Txn> transactions;
+  final String Function(String?) categoryName;
+  final Color Function(String?) categoryColor;
+  final void Function(Txn) onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final headerStyle = TextStyle(
+      fontSize: 10,
+      fontWeight: FontWeight.w700,
+      letterSpacing: 0.6,
+      color: theme.colorScheme.onSurfaceVariant,
+    );
+    final cellStyle = TextStyle(fontSize: 12, color: theme.colorScheme.onSurface);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Card(
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          children: [
+            // Header tabel
+            Container(
+              padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+              color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.35),
+              child: Row(
+                children: [
+                  Expanded(flex: 20, child: Text('TANGGAL', style: headerStyle)),
+                  Expanded(flex: 44, child: Text('KETERANGAN', style: headerStyle)),
+                  Expanded(flex: 26, child: Text('KATEGORI', style: headerStyle)),
+                  Expanded(
+                    flex: 30,
+                    child: Text('NOMINAL', style: headerStyle, textAlign: TextAlign.right),
+                  ),
+                ],
+              ),
+            ),
+            for (var i = 0; i < transactions.length; i++) ...[
+              if (i > 0) Divider(height: 1, color: theme.dividerColor.withValues(alpha: 0.5)),
+              InkWell(
+                onTap: () => onTap(transactions[i]),
+                child: Container(
+                  color: i.isEven
+                      ? Colors.transparent
+                      : theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.12),
+                  padding: const EdgeInsets.fromLTRB(14, 11, 14, 11),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Expanded(
+                        flex: 20,
+                        child: Text(
+                          formatDateShort(transactions[i].occurredAt),
+                          style: cellStyle.copyWith(fontSize: 11.5, color: theme.colorScheme.onSurfaceVariant),
+                        ),
+                      ),
+                      Expanded(
+                        flex: 44,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              (transactions[i].note?.isNotEmpty == true
+                                      ? transactions[i].note!
+                                      : (transactions[i].payee?.isNotEmpty == true
+                                          ? transactions[i].payee!
+                                          : transactions[i].type == 'INCOME'
+                                              ? 'Pemasukan'
+                                              : 'Pengeluaran'))
+                                  .trim(),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: cellStyle.copyWith(fontWeight: FontWeight.w600),
+                            ),
+                            if (transactions[i].attachmentId?.isNotEmpty == true)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 2),
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.attach_file, size: 10, color: theme.colorScheme.onSurfaceVariant),
+                                    Text(' Lampiran', style: TextStyle(fontSize: 9.5, color: theme.colorScheme.onSurfaceVariant)),
+                                  ],
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                      Expanded(
+                        flex: 26,
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 7,
+                              height: 7,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: categoryColor(transactions[i].categoryId),
+                              ),
+                            ),
+                            const SizedBox(width: 5),
+                            Expanded(
+                              child: Text(
+                                categoryName(transactions[i].categoryId),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: cellStyle.copyWith(fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Expanded(
+                        flex: 30,
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerRight,
+                          child: Text(
+                            '${transactions[i].type == 'INCOME' ? '+' : '−'}${formatMoney(transactions[i].amount)}',
+                            textAlign: TextAlign.right,
+                            style: cellStyle.copyWith(
+                              fontWeight: FontWeight.w700,
+                              fontFeatures: const [FontFeature.tabularFigures()],
+                              color: transactions[i].type == 'INCOME' ? kIncome : null,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
   }
 }
 

@@ -1,4 +1,4 @@
-import 'package:fl_chart/fl_chart.dart';
+﻿import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,6 +9,7 @@ import '../../core/money.dart';
 import '../../core/theme.dart';
 import '../../data/local/database.dart';
 import '../common/widgets.dart';
+import 'finance_report_pdf.dart';
 
 /// Laporan Keuangan Lengkap & Analisis Otomatis Eksekutif.
 class ReportsScreen extends ConsumerWidget {
@@ -85,8 +86,8 @@ class ReportsScreen extends ConsumerWidget {
         title: const Text('Laporan Keuangan', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
         actions: [
           IconButton(
-            icon: const Icon(Icons.share_outlined, size: 20),
-            tooltip: 'Ekspor Laporan Keuangan',
+            icon: const Icon(Icons.picture_as_pdf_outlined, size: 20),
+            tooltip: 'Cetak / Simpan PDF',
             onPressed: () => _exportFinancialReport(
               context,
               ref,
@@ -683,92 +684,50 @@ class ReportsScreen extends ConsumerWidget {
     Map<String, int> byCategory,
     Map<String, Category> categoryMap,
   ) async {
-    final monthName = formatMonthYear(month);
-    final totalNetWorth = totalBalance + totalAssetValue - payable;
+    final workspace = ref.read(currentWorkspaceProvider);
+    final balances = ref.read(walletBalancesProvider).valueOrNull ?? const <WalletBalance>[];
+    final budgets = ref.read(budgetsProvider).valueOrNull ?? const <Budget>[];
+    final debts = ref.read(debtsProvider).valueOrNull ?? const <Debt>[];
+    final spentMap = ref.read(expenseByCategoryProvider).valueOrNull ?? const <String, int>{};
+    final trend = ref.read(sixMonthTransactionsProvider).valueOrNull ?? const <Txn>[];
 
-    final sb = StringBuffer();
-    sb.writeln('==========================================');
-    sb.writeln('  LAPORAN KEUANGAN EKSEKUTIF - $monthName');
-    sb.writeln('  Aplikasi: Axon Dayli Pilot');
-    sb.writeln('  Tanggal Cetak: ${formatDateFull(DateTime.now())}');
-    sb.writeln('==========================================\n');
-
-    sb.writeln('--- POSISI KEKAYAAN BERSIH (NET WORTH) ---');
-    sb.writeln('Total Kas / Saldo Dompet  : ${formatMoney(totalBalance)}');
-    sb.writeln('Total Aset Terhitung      : ${formatMoney(totalAssetValue)} (Setelah Penyusutan)');
-    sb.writeln('Total Utang / Kewajiban   : -${formatMoney(payable)}');
-    sb.writeln('KEKAYAAN BERSIH (NET WORTH): ${formatMoney(totalNetWorth)}');
-    sb.writeln('');
-
-    sb.writeln('--- RINGKASAN ARUS KAS ---');
-    sb.writeln('Total Pemasukan           : ${formatMoney(income)}');
-    sb.writeln('Total Pengeluaran         : ${formatMoney(expense)}');
-    sb.writeln('Arus Kas Bersih           : ${formatMoney(net)}');
-    sb.writeln('');
-
-    sb.writeln('--- RINCIAN PENGELUARAN PER KATEGORI ---');
-    if (byCategory.isEmpty) {
-      sb.writeln('Belum ada pengeluaran tercatat.');
-    } else {
-      byCategory.forEach((catId, total) {
-        final name = categoryMap[catId]?.name ?? 'Kategori Lain';
-        sb.writeln('- $name: ${formatMoney(total)}');
-      });
-    }
-    sb.writeln('');
-
-    sb.writeln('--- TRANSAKSI BULAN INI (${transactions.length}) ---');
+    final incomeByCategory = <String, int>{};
     for (final t in transactions) {
-      final sign = t.type == 'INCOME' ? '+' : '-';
-      final typeStr = t.type == 'INCOME' ? '[MASUK]' : (t.type == 'EXPENSE' ? '[KELUAR]' : '[TRANSFER]');
-      sb.writeln('${formatDateShort(t.occurredAt)} $typeStr $sign${formatMoney(t.amount)} | ${t.payee ?? t.note ?? 'Transaksi'}');
+      if (t.type != 'INCOME') continue;
+      final key = t.categoryId ?? 'uncategorized';
+      incomeByCategory[key] = (incomeByCategory[key] ?? 0) + t.amount;
     }
-    sb.writeln('\n==========================================');
 
-    final textReport = sb.toString();
-    await Clipboard.setData(ClipboardData(text: textReport));
+    final monthlyTrend = <String, List<int>>{};
+    for (final t in trend) {
+      final key = '${t.occurredAt.year}-${t.occurredAt.month.toString().padLeft(2, '0')}';
+      monthlyTrend.putIfAbsent(key, () => [0, 0]);
+      if (t.type == 'INCOME') monthlyTrend[key]![0] += t.amount;
+      if (t.type == 'EXPENSE') monthlyTrend[key]![1] += t.amount;
+    }
 
-    if (context.mounted) {
-      showDialog<void>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: Text('Laporan $monthName Disalin'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Ringkasan Laporan Keuangan Eksekutif Anda telah disalin ke Clipboard!'),
-              const SizedBox(height: 12),
-              const Text('Gunakan laporan ini untuk dibagikan ke akuntan atau disimpan sebagai arsip:'),
-              const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Theme.of(ctx).colorScheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                height: 140,
-                child: SingleChildScrollView(
-                  child: Text(textReport, style: const TextStyle(fontSize: 10.5, fontFamily: 'monospace')),
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Clipboard.setData(ClipboardData(text: textReport));
-                showAppSnack(ctx, 'Teks laporan disalin ke clipboard');
-              },
-              child: const Text('Salin Teks'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Selesai'),
-            ),
-          ],
-        ),
-      );
+    final data = FinanceReportData(
+      month: month,
+      workspaceName: workspace?.name ?? 'Pribadi',
+      income: income,
+      expense: expense,
+      net: net,
+      totalBalance: totalBalance,
+      transactions: transactions,
+      expenseByCategory: byCategory,
+      incomeByCategory: incomeByCategory,
+      categoryMap: categoryMap,
+      balances: balances,
+      budgets: budgets,
+      spentMap: spentMap,
+      debts: debts,
+      monthlyTrend: monthlyTrend,
+    );
+
+    try {
+      await printFinanceReport(data);
+    } catch (e) {
+      if (context.mounted) showAppSnack(context, 'Gagal membuat PDF: $e', error: true);
     }
   }
 }
@@ -864,17 +823,17 @@ class _SurvivalAnalysisCard extends StatelessWidget {
     IconData statusIcon;
 
     if (monthlyNetCashflow < 0) {
-      statusTitle = '🔴 KRITIS / DEFISIT KAS (Risiko Tidak Survive)';
+      statusTitle = 'ðŸ”´ KRITIS / DEFISIT KAS (Risiko Tidak Survive)';
       statusColor = Colors.red.shade700;
       statusIcon = Icons.warning_amber_rounded;
       statusDesc = 'Keuangan Anda defisit ${formatMoney(monthlyNetCashflow.abs())}/bulan! Saldo kas diproyeksikan habis dalam ${runwayMonths < 1 ? 'kurang dari 1 bulan' : '${runwayMonths.toStringAsFixed(1)} bulan'} jika tidak ada penghematan atau pemasukan tambahan.';
     } else if (runwayMonths < 3.0 || debtRatio > 40.0) {
-      statusTitle = '🟧 WASPADA (Daya Tahan Rentan)';
+      statusTitle = 'ðŸŸ§ WASPADA (Daya Tahan Rentan)';
       statusColor = Colors.orange.shade800;
       statusIcon = Icons.error_outline_rounded;
       statusDesc = 'Keuangan Anda surplus ${formatMoney(monthlyNetCashflow)}/bulan, namun cadangan kas hanya mampu bertahan ${runwayMonths.toStringAsFixed(1)} bulan dan beban cicilan utang mengambil ${debtRatio.toStringAsFixed(1)}% dari pemasukan.';
     } else {
-      statusTitle = '🟢 SANGAT SEHAT & SURVIVE (Aman)';
+      statusTitle = 'ðŸŸ¢ SANGAT SEHAT & SURVIVE (Aman)';
       statusColor = const Color(0xFF059669);
       statusIcon = Icons.verified_user_rounded;
       statusDesc = 'Keuangan Anda SANGAT SEHAT! Memiliki surplus kas ${formatMoney(monthlyNetCashflow)}/bulan, beban utang ideal (${debtRatio.toStringAsFixed(1)}%), dan dana darurat bertahan hingga ${runwayMonths >= 24 ? '2+ tahun' : '${runwayMonths.toStringAsFixed(1)} bulan'}.';
@@ -1046,7 +1005,7 @@ class _SurvivalAnalysisCard extends StatelessWidget {
                             children: [
                               Text(d.counterparty, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
                               Text(
-                                'Sisa ${formatMoney(d.remaining)} · Cicilan ${formatMoney(inst)}/bln',
+                                'Sisa ${formatMoney(d.remaining)} Â· Cicilan ${formatMoney(inst)}/bln',
                                 style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurfaceVariant),
                               ),
                             ],

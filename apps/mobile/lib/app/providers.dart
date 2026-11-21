@@ -152,6 +152,9 @@ final selectedMonthProvider = StateProvider<DateTime>((ref) {
   return DateTime(now.year, now.month);
 });
 
+/// Mode tampilan daftar transaksi: 'list' (kartu) atau 'table' (tabel).
+final transactionsViewModeProvider = StateProvider<String>((ref) => 'list');
+
 final walletsProvider = StreamProvider<List<Wallet>>((ref) {
   final ws = ref.watch(currentWorkspaceProvider);
   if (ws == null) return Stream.value(const <Wallet>[]);
