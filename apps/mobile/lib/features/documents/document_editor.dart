@@ -8,14 +8,17 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 
 import '../../app/providers.dart';
 import '../../core/dates.dart';
+import '../../core/pdf_exporter.dart';
 import '../../data/local/database.dart';
 import '../common/widgets.dart';
 
 const docCategories = <String, String>{
-  'IDENTITY': 'Identitas (KTP, KK, Buku Nikah)',
-  'LEGAL': 'Hukum & Notaris (Akta, Sertifikat)',
-  'TAX': 'Perpajakan (NPWP, SPT)',
-  'BUSINESS': 'Perusahaan & Usaha (NIB, SIUP, Kontrak)',
+  'IDENTITY': 'Identitas & Kependudukan (KTP, KK, SIM, Paspor)',
+  'LEGAL': 'Properti & Legalitas (Sertifikat, Akta, PBB, IMB)',
+  'VEHICLE': 'Kendaraan & Otomotif (STNK, BPKB, Faktur)',
+  'TAX': 'Perpajakan & Keuangan (NPWP, SPT, Polis Asuransi)',
+  'BUSINESS': 'Hukum & Perusahaan (NIB, SIUP, SK Kemenkumham)',
+  'EDUCATION': 'Pendidikan & Karir (Ijazah, Transkrip, Sertifikat)',
   'OTHER': 'Lainnya',
 };
 
@@ -414,17 +417,27 @@ class _DocumentEditorSheetState extends ConsumerState<_DocumentEditorSheet> {
                   style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, letterSpacing: -0.3),
                 ),
                 if (widget.existing != null)
-                  ShadButton.destructive(
-                    onPressed: (_saving || _deleting || _saved) ? null : _deleteDocument,
-                    child: _deleting
-                        ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                        : const Row(
-                            children: [
-                              Icon(Icons.delete_outline, size: 14),
-                              SizedBox(width: 4),
-                              Text('Hapus Dokumen'),
-                            ],
-                          ),
+                  Row(
+                    children: [
+                      IconButton(
+                        tooltip: 'Cetak / Share PDF Document Report',
+                        icon: const Icon(Icons.picture_as_pdf_outlined, color: Colors.redAccent, size: 20),
+                        onPressed: () => DocumentPdfExporter.exportAndShareDocumentPdf(widget.existing!),
+                      ),
+                      const SizedBox(width: 4),
+                      ShadButton.destructive(
+                        onPressed: (_saving || _deleting || _saved) ? null : _deleteDocument,
+                        child: _deleting
+                            ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                            : const Row(
+                                children: [
+                                  Icon(Icons.delete_outline, size: 14),
+                                  SizedBox(width: 4),
+                                  Text('Hapus'),
+                                ],
+                              ),
+                      ),
+                    ],
                   ),
               ],
             ),

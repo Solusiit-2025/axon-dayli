@@ -6,6 +6,7 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 
 import '../../app/providers.dart';
 import '../../core/dates.dart';
+import '../../core/pdf_exporter.dart';
 import '../../core/theme.dart';
 import '../../data/local/database.dart';
 import '../common/widgets.dart';
@@ -25,10 +26,12 @@ class DocumentsScreen extends ConsumerWidget {
 
     final categories = <String, String>{
       'ALL': 'Semua',
-      'IDENTITY': 'Identitas (KTP, KK)',
-      'LEGAL': 'Akta & Notaris',
-      'TAX': 'Pajak (NPWP)',
-      'BUSINESS': 'Usaha (NIB, SIUP)',
+      'IDENTITY': 'Identitas (KTP, KK, SIM)',
+      'LEGAL': 'Properti (Sertifikat, AJB)',
+      'VEHICLE': 'Kendaraan (STNK, BPKB)',
+      'TAX': 'Pajak & NPWP',
+      'BUSINESS': 'Hukum & Company NIB',
+      'EDUCATION': 'Ijazah & Karir',
       'OTHER': 'Lainnya',
     };
 
@@ -217,6 +220,11 @@ class _DocumentCard extends ConsumerWidget {
                           ),
                       ],
                     ),
+                  ),
+                  IconButton(
+                    tooltip: 'Cetak / Share PDF Report Dokumen',
+                    icon: const Icon(Icons.picture_as_pdf_outlined, size: 20, color: Color(0xFFDC2626)),
+                    onPressed: () => DocumentPdfExporter.exportAndShareDocumentPdf(doc),
                   ),
                   IconButton(
                     icon: const Icon(Icons.edit_outlined, size: 18),

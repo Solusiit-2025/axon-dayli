@@ -37,7 +37,13 @@ dependencies:
   timezone: ^0.9.4
   image_picker: ^1.2.4
   file_picker: ^8.1.7
+  pdf: ^3.11.1
+  printing: ^5.13.4
   shadcn_ui: ^0.40.0
+
+dependency_overrides:
+  image: 4.2.0
+  archive: 3.6.1
 
 dev_dependencies:
   flutter_test:
